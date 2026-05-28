@@ -2065,6 +2065,14 @@ function AppView({ app, onClose }) {
       : { type:'tween', duration:0.30, ease:[0.32,0.72,0,1] };
 
   log('AppView RENDER', { id: app.id, layoutId: containerLayoutId, hasExplicitExit: containerExit !== undefined });
+  // Two-layer structure (deliberate): the OUTER motion.div owns the layoutId
+  // morph and the open/close/cross-nav animation (initial/animate/exit). The
+  // INNER motion.div owns drag-to-dismiss feedback via motion values for y,
+  // scale, and opacity. They are kept on different elements because driving
+  // the same prop from both `style` (motion value) and `animate`/`initial`/`exit`
+  // (fixed numbers) produced "undefined" reads during framer-motion's layoutId
+  // projection snapshot, which the browser logged as `style.borderTopLeftRadius:
+  // undefined`, `style.opacity: undefined`, etc.
   return (
     <motion.div layoutId={containerLayoutId}
       data-cb-appview={app.id}
@@ -2073,18 +2081,22 @@ function AppView({ app, onClose }) {
       // gradient — go straight to the dark app background to avoid a flash of pink/blue.
       // When we DO morph from the home icon we need the tile colour briefly so the
       // layoutId animation has matching colours between source and destination.
-      style={{ background: skipMorph ? '#0a0a0a' : app.tile, borderRadius:0, y, scale, opacity }}
+      style={{ background: skipMorph ? '#0a0a0a' : app.tile, borderRadius: 0 }}
       initial={containerInitial}
       animate={containerAnimate}
       exit={containerExit}
-      drag={(skipMorph || dragLocked) ? false : 'y'}
-      dragConstraints={{ top:0, bottom:0 }} dragElastic={{ top:0, bottom:0.6 }}
-      onDragEnd={(_, info) => { if (info.offset.y > 140 || info.velocity.y > 600) onClose(); }}
       onAnimationStart={(def) => log('AppView animStart', { id: app.id, def })}
       onAnimationComplete={(def) => log('AppView animComplete', { id: app.id, def })}
       onLayoutAnimationStart={() => log('AppView layoutStart', { id: app.id })}
       onLayoutAnimationComplete={() => log('AppView layoutComplete', { id: app.id })}
       transition={containerTransition}>
+      <motion.div
+        className="absolute inset-0"
+        style={{ y, scale, opacity }}
+        drag={(skipMorph || dragLocked) ? false : 'y'}
+        dragConstraints={{ top:0, bottom:0 }}
+        dragElastic={{ top:0, bottom:0.6 }}
+        onDragEnd={(_, info) => { if (info.offset.y > 140 || info.velocity.y > 600) onClose(); }}>
       {/* Header and section render at full opacity from t=0 so the page content is
           visible throughout the morph (iOS-style: content scales with the icon as it
           expands). The section's bg-neutral-950 immediately covers the tile gradient
@@ -2130,6 +2142,7 @@ function AppView({ app, onClose }) {
                  paddingBottom:'calc(max(env(safe-area-inset-bottom),12px) + 40px)' }}>
         {View ? <View /> : <div className="px-6"><p className="text-white/70">No view for {app.label}</p></div>}
       </motion.section>
+      </motion.div>
     </motion.div>
   );
 }
