@@ -80,7 +80,7 @@ const useDevice = () => useContext(DeviceCtx);
 // console that the user is actually running the latest build. Format: v<major>.<minor>.
 // Debug logging is on by default during this debug window so the user does not need
 // to flip a flag. Disable with localStorage.setItem('cb-debug','0').
-const LOG_VERSION = 'v2.1';
+const LOG_VERSION = 'v2.2';
 const CB_DEBUG = (() => {
   try {
     if (typeof window === 'undefined') return false;
@@ -838,8 +838,10 @@ function MerchApp() {
                     addToCart(m, picks);
                   };
                   return (
-                    <button key={m.id} onClick={() => setSelected(m)}
-                      className="text-left overflow-hidden rounded-2xl border border-white/10 bg-white/[0.06] backdrop-blur-md transition hover:border-white/25 active:scale-[0.98]">
+                    <div key={m.id} role="button" tabIndex={0}
+                      onClick={() => setSelected(m)}
+                      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelected(m); } }}
+                      className="cursor-pointer text-left overflow-hidden rounded-2xl border border-white/10 bg-white/[0.06] backdrop-blur-md transition hover:border-white/25 active:scale-[0.98]">
                       <div className={'aspect-square bg-gradient-to-br ' + m.color} />
                       <div className="flex items-center justify-between gap-2 p-3">
                         <div className="min-w-0 flex-1">
@@ -852,7 +854,7 @@ function MerchApp() {
                           {hasChoice ? 'Options' : 'Buy'}
                         </button>
                       </div>
-                    </button>
+                    </div>
                   );
                 })}
               </div>
@@ -1837,15 +1839,14 @@ function AppIcon({ app, onTap, showLabel = true, size = 62 }) {
     <button onClick={handle} aria-label={'Open ' + app.label}
       className="group flex flex-col items-center gap-1.5 outline-none focus-visible:ring-2 focus-visible:ring-white/70 rounded-2xl">
       <motion.div layoutId={'app-tile-' + app.id} className="icon-shadow relative overflow-hidden"
-        style={{ width:size, height:size, borderRadius:size*0.28, background:app.tile }}
+        style={{ width:size, height:size, borderRadius:size*0.28, background:app.tile, opacity:1 }}
         whileTap={{ scale:0.88 }} transition={{ type:'spring', stiffness:400, damping:28 }}>
         <span className="pointer-events-none absolute inset-0"
           style={{ background:'linear-gradient(180deg,rgba(255,255,255,0.28) 0%,rgba(255,255,255,0) 35%,rgba(0,0,0,0.18) 100%)' }} />
-        <motion.div layoutId={'app-glyph-' + app.id}
-          className="absolute inset-0 grid place-items-center text-[28px] leading-none text-white">{app.glyph}</motion.div>
+        <div className="absolute inset-0 grid place-items-center text-[28px] leading-none text-white">{app.glyph}</div>
       </motion.div>
-      {showLabel && <motion.span layoutId={'app-label-' + app.id}
-        className="text-[13px] font-semibold leading-tight text-white drop-shadow-[0_1px_3px_rgba(0,0,0,0.7)]">{app.label}</motion.span>}
+      {showLabel && <span
+        className="text-[13px] font-semibold leading-tight text-white drop-shadow-[0_1px_3px_rgba(0,0,0,0.7)]">{app.label}</span>}
     </button>
   );
 }
@@ -2055,12 +2056,14 @@ function AppView({ app, onClose }) {
     };
   }, []);
 
-  const containerLayoutId   = skipMorph ? undefined : ('app-tile-'  + app.id);
-  const glyphLayoutId       = skipMorph ? undefined : ('app-glyph-' + app.id);
-  const labelLayoutId       = skipMorph ? undefined : ('app-label-' + app.id);
+  const containerLayoutId = skipMorph ? undefined : ('app-tile-' + app.id);
 
+  const usesLayoutMorph = !!containerLayoutId;
   const containerInitial = enteredViaCrossNav ? { x: '100%', opacity: 0.6, scale: 1 } : false;
-  const containerAnimate = { x: 0, opacity: 1, scale: 1 };
+  // When layoutId morphs the tile, do not also animate opacity/scale on this element —
+  // the icon side has no opacity in its snapshot, so the dual source of truth made
+  // framer-motion write style.opacity: undefined during projection.
+  const containerAnimate = usesLayoutMorph ? undefined : { x: 0, opacity: 1, scale: 1 };
   // Exit: if being replaced by another app, slide out left.
   // If being closed (X) and we entered via cross-nav, slide down + fade (no icon to morph to).
   // Otherwise let layoutId handle the morph back to the home icon.
@@ -2096,7 +2099,7 @@ function AppView({ app, onClose }) {
       // layoutId animation has matching colours between source and destination.
       style={{ background: skipMorph ? '#0a0a0a' : app.tile, borderRadius: 0 }}
       initial={containerInitial}
-      animate={containerAnimate}
+      {...(containerAnimate !== undefined ? { animate: containerAnimate } : {})}
       exit={containerExit}
       onAnimationStart={(def) => log('AppView animStart', { id: app.id, def })}
       onAnimationComplete={(def) => log('AppView animComplete', { id: app.id, def })}
@@ -2132,9 +2135,8 @@ function AppView({ app, onClose }) {
                 <span className="whitespace-nowrap pr-0.5">{fromApp.label}</span>
               </button>
             )}
-            <motion.div layoutId={glyphLayoutId}
-              className="grid h-9 w-9 shrink-0 place-items-center rounded-xl text-[20px]" style={{ background:app.tile }}>{app.glyph}</motion.div>
-            <motion.h1 layoutId={labelLayoutId} className="truncate text-[17px] font-semibold text-white">{app.label}</motion.h1>
+            <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl text-[20px]" style={{ background:app.tile }}>{app.glyph}</div>
+            <h1 className="truncate text-[17px] font-semibold text-white">{app.label}</h1>
           </div>
           <button onClick={() => { log('close X TAP', { id: app.id }); onClose(); }} aria-label="Close"
             className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-white/15 text-white backdrop-blur-md transition hover:bg-white/25 active:scale-90">
