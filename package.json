@@ -25,5 +25,13 @@
     "typescript": "^5.6.3",
     "vite": "^5.4.11",
     "vite-plugin-compression": "^0.5.1"
-  }
+  },
+  "browserslist": [
+    "last 2 Chrome versions",
+    "last 2 Firefox versions",
+    "last 2 Safari versions",
+    "last 2 Edge versions",
+    "iOS >= 14",
+    "not dead"
+  ]
 }
