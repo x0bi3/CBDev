@@ -2000,10 +2000,7 @@ function AppView({ app, isOpen, onClose, onExitComplete }) {
   const tileLayoutIdRef = React.useRef(
     enteredViaCrossNav ? undefined : ('app-tile-' + app.id)
   );
-  const hasTileMorph = !!tileLayoutIdRef.current;
   const isReplaced = !isOpen && !!openAppId;
-  const morphClose = hasTileMorph && !enteredViaCrossNav && !isReplaced;
-
   const closeTarget = enteredViaCrossNav
     ? { y: 80, opacity: 0, scale: 0.96 }
     : { opacity: 0, scale: 0.94 };
@@ -2013,45 +2010,42 @@ function AppView({ app, isOpen, onClose, onExitComplete }) {
     : enteredViaCrossNav
       ? { type:'tween', duration:0.42, ease:[0.22,1,0.36,1] }
       : { type:'tween', duration:0.28, ease:[0.32,0.72,0,1] };
-  const layoutTween = { type:'tween', duration:0.30, ease:[0.32,0.72,0,1] };
 
   const controls = useAnimationControls();
   const exitDoneRef = React.useRef(false);
 
-  const finishExit = useCallback(() => {
-    if (exitDoneRef.current) return;
-    exitDoneRef.current = true;
-    onExitComplete();
-  }, [onExitComplete]);
-
+  // Drive close explicitly. After a layoutId open, animate was omitted so flipping
+  // isOpen via the X button never started a close tween — pointer-events went
+  // none immediately and onAnimationComplete never fired (Escape often worked
+  // because it was pressed after the layout morph had fully settled).
   useEffect(() => {
     if (isOpen) {
       exitDoneRef.current = false;
       if (enteredViaCrossNav) {
         controls.start({ x: 0, opacity: 1, scale: 1, transition: { type:'tween', duration:0.42, ease:[0.22,1,0.36,1] } });
-      } else if (!hasTileMorph) {
-        controls.start({ x: 0, opacity: 1, scale: 1, transition: layoutTween });
+      } else if (!tileLayoutIdRef.current) {
+        controls.start({ x: 0, opacity: 1, scale: 1, transition: { type:'tween', duration:0.30, ease:[0.32,0.72,0,1] } });
       } else {
-        controls.start({ opacity: 1, scale: 1, x: 0, y: 0 });
+        controls.start({ opacity: 1, scale: 1 });
       }
       return;
     }
-
-    // Home-screen close: morph back to the icon as one motion (no fade-then-collapse).
-    if (morphClose) {
-      controls.start({ opacity: 1, scale: 1, x: 0, y: 0 });
-      const fallback = setTimeout(finishExit, 360);
-      return () => clearTimeout(fallback);
-    }
-
-    let cancelled = false;
     const target = isReplaced ? replaceTarget : closeTarget;
+    let cancelled = false;
     controls.start({ ...target, transition: closeTransition }).then(() => {
-      if (!cancelled) finishExit();
+      if (!cancelled && !exitDoneRef.current) {
+        exitDoneRef.current = true;
+        onExitComplete();
+      }
     });
-    const fallback = setTimeout(() => { if (!cancelled) finishExit(); }, 400);
+    const fallback = setTimeout(() => {
+      if (!cancelled && !exitDoneRef.current) {
+        exitDoneRef.current = true;
+        onExitComplete();
+      }
+    }, 400);
     return () => { cancelled = true; clearTimeout(fallback); };
-  }, [isOpen, morphClose, isReplaced, enteredViaCrossNav, hasTileMorph, controls, finishExit, closeTransition]);
+  }, [isOpen, isReplaced, enteredViaCrossNav, controls, onExitComplete]);
 
   const y = useMotionValue(0);
   const scale = useTransform(y, [0,300], [1,0.85]);
@@ -2062,23 +2056,18 @@ function AppView({ app, isOpen, onClose, onExitComplete }) {
     return () => { document.body.style.overflow = ''; };
   }, []);
 
-  // Keep layoutId through close so the shell morphs back to the home icon in one shot.
-  const layoutId = hasTileMorph && !isReplaced ? tileLayoutIdRef.current : undefined;
+  const layoutId = isOpen && tileLayoutIdRef.current ? tileLayoutIdRef.current : undefined;
 
   return (
     <motion.div layoutId={layoutId}
       className="fixed inset-0 z-40 overflow-hidden bg-neutral-950"
       style={{
-        background: enteredViaCrossNav ? '#0a0a0a' : app.tile,
-        borderRadius: morphClose ? undefined : 0,
+        background: (enteredViaCrossNav || !isOpen) ? '#0a0a0a' : app.tile,
+        borderRadius: 0,
         pointerEvents: isOpen ? 'auto' : 'none',
       }}
       initial={enteredViaCrossNav ? { x: '100%', opacity: 0.6, scale: 1 } : false}
-      animate={controls}
-      transition={{ layout: layoutTween }}
-      onLayoutAnimationComplete={() => {
-        if (!isOpen && morphClose) finishExit();
-      }}>
+      animate={controls}>
       <motion.div
         className="absolute inset-0"
         style={{ y, scale, opacity }}
