@@ -2068,7 +2068,7 @@ function AppView({ app, isOpen, onClose, onExitComplete }) {
       return;
     }
     if (morphClose) {
-      const fallback = setTimeout(finishExit, TILE_CLOSE_S * 1000 + 100);
+      const fallback = setTimeout(finishExit, 200);
       return () => clearTimeout(fallback);
     }
     let cancelled = false;
