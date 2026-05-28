@@ -1795,7 +1795,14 @@ function Wallpaper({ theme, dimmed }) {
       <div className="absolute inset-0 opacity-[0.05] mix-blend-overlay pointer-events-none"
         style={{ backgroundImage:"url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>\")" }} />
 
-      {dimmed && <motion.div initial={{ opacity:0 }} animate={{ opacity:0.35 }} exit={{ opacity:0 }} transition={{ duration:0.18 }} className="absolute inset-0 bg-black" />}
+      <AnimatePresence>
+        {dimmed && (
+          <motion.div key="dim"
+            initial={{ opacity:0 }} animate={{ opacity:0.35 }} exit={{ opacity:0 }}
+            transition={{ duration:0.30, ease:[0.32,0.72,0,1] }}
+            className="absolute inset-0 bg-black" />
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }
@@ -2014,6 +2021,7 @@ function AppView({ app, isOpen, onClose, onExitComplete }) {
       ? { type:'tween', duration:0.42, ease:[0.22,1,0.36,1] }
       : { type:'tween', duration:0.28, ease:[0.32,0.72,0,1] };
   const layoutTween = { duration:0.30, ease:[0.32,0.72,0,1] };
+  const closeMotion = { duration:0.30, ease:[0.32,0.72,0,1] };
 
   const controls = useAnimationControls();
   const exitDoneRef = React.useRef(false);
@@ -2065,21 +2073,27 @@ function AppView({ app, isOpen, onClose, onExitComplete }) {
     <motion.div layoutId={layoutId}
       className="fixed inset-0 z-40 overflow-hidden bg-neutral-950"
       style={{
-        ...(useControlsAnimate ? { background:'#0a0a0a', borderRadius:0 } : {}),
+        ...(morphClose ? { background:app.tile } : useControlsAnimate ? { background:'#0a0a0a', borderRadius:0 } : {}),
         pointerEvents: isOpen ? 'auto' : 'none',
       }}
       initial={enteredViaCrossNav ? { x: '100%', opacity: 0.6, scale: 1 } : false}
-      animate={useControlsAnimate ? controls : (isOpen
-        ? { background:'#0a0a0a', borderRadius:0 }
-        : { background:app.tile, borderRadius:18 })}
-      transition={{ layout: layoutTween, default: { duration:0.22, ease:[0.32,0.72,0,1] } }}
+      animate={useControlsAnimate ? controls : { borderRadius: isOpen ? 0 : 18 }}
+      transition={{ layout: layoutTween, borderRadius: closeMotion, default: closeMotion }}
       onLayoutAnimationComplete={() => {
         if (!isOpen && morphClose) finishExit();
       }}>
+      {morphClose && (
+        <motion.div
+          aria-hidden
+          className="pointer-events-none absolute inset-0 z-[1] bg-[#0a0a0a]"
+          animate={{ opacity: isOpen ? 1 : 0 }}
+          transition={closeMotion}
+        />
+      )}
       <motion.div
-        className="absolute inset-0"
+        className="absolute inset-0 z-[2]"
         animate={{ opacity: isOpen ? 1 : 0 }}
-        transition={{ duration: isOpen ? 0.24 : 0.18, ease:[0.32,0.72,0,1] }}>
+        transition={morphClose ? closeMotion : { duration: isOpen ? 0.24 : 0.18, ease:[0.32,0.72,0,1] }}>
       <motion.div
         className="absolute inset-0"
         style={{ y, scale, opacity }}
