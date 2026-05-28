@@ -1,22 +1,89 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no" />
-    <meta name="theme-color" content="#000000" />
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <title>CreativeBuilds — Custom web, mobile & automation</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
-      rel="stylesheet"
-    />
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
-  </body>
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no" />
+<meta name="theme-color" content="#0b0b12" />
+<meta name="color-scheme" content="dark" />
+<title>CreativeBuilds: Custom software for small businesses and side projects</title>
+<meta name="description" content="CreativeBuilds is Ryan Baldwin, an independent software builder in Wisconsin. I design and build custom websites, web apps, mobile apps, and automations for small businesses, creators, and side projects that need something more than a template." />
+<meta name="author" content="Ryan Baldwin" />
+<meta name="keywords" content="custom software, small business websites, web apps, mobile apps, automation, Wisconsin developer, freelance developer, Ryan Baldwin, CreativeBuilds" />
+<link rel="canonical" href="https://creativebuilds.dev/" />
+
+<!-- Open Graph (LinkedIn, Facebook, Discord, etc.) -->
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="CreativeBuilds" />
+<meta property="og:title" content="CreativeBuilds: Custom software for small businesses and side projects" />
+<meta property="og:description" content="Independent software builder. Custom websites, web apps, mobile apps, and automation for the people who need something more than a template." />
+<meta property="og:url" content="https://creativebuilds.dev/" />
+<meta property="og:locale" content="en_US" />
+<meta property="og:image" content="https://creativebuilds.dev/og-cover.png" />
+<meta property="og:image:alt" content="CreativeBuilds: a phone-shaped portfolio for a Wisconsin software builder" />
+
+<!-- Twitter / X card -->
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="CreativeBuilds: Custom software for small businesses and side projects" />
+<meta name="twitter:description" content="Independent software builder. Custom websites, web apps, mobile apps, and automation." />
+<meta name="twitter:image" content="https://creativebuilds.dev/og-cover.png" />
+
+<!-- Favicon (inline SVG so it works without a separate file) -->
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop offset='0%25' stop-color='%236366f1'/><stop offset='100%25' stop-color='%23d946ef'/></linearGradient></defs><rect width='64' height='64' rx='14' fill='url(%23g)'/><text x='32' y='42' font-family='Inter,system-ui,sans-serif' font-size='30' font-weight='700' text-anchor='middle' fill='white'>C</text></svg>" />
+
+<!-- JSON-LD: Person + ProfessionalService -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "Person",
+      "@id": "https://creativebuilds.dev/#ryan",
+      "name": "Ryan Baldwin",
+      "jobTitle": "Software Builder",
+      "url": "https://creativebuilds.dev/",
+      "email": "hello@creativebuilds.dev",
+      "worksFor": { "@id": "https://creativebuilds.dev/#org" },
+      "address": { "@type": "PostalAddress", "addressRegion": "WI", "addressCountry": "US" },
+      "knowsAbout": ["Web development", "Mobile development", "Automation", "React", "TypeScript", "Python", "PostgreSQL"]
+    },
+    {
+      "@type": "ProfessionalService",
+      "@id": "https://creativebuilds.dev/#org",
+      "name": "CreativeBuilds",
+      "url": "https://creativebuilds.dev/",
+      "email": "hello@creativebuilds.dev",
+      "founder": { "@id": "https://creativebuilds.dev/#ryan" },
+      "areaServed": "US",
+      "priceRange": "$$",
+      "description": "Independent software studio building custom websites, web apps, mobile apps, and automations for small businesses, creators, and side projects.",
+      "slogan": "Custom software, built one conversation at a time."
+    },
+    {
+      "@type": "WebSite",
+      "url": "https://creativebuilds.dev/",
+      "name": "CreativeBuilds",
+      "publisher": { "@id": "https://creativebuilds.dev/#org" }
+    }
+  ]
+}
+</script>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<!-- Import map maps bare specifiers used in our JSX to CDN URLs -->
+<!-- Babel Standalone compiles the JSX below in-browser -->
+</head>
+<body>
+  <div id="boot">
+    <div style="text-align:center">
+      <div class="ring"></div>
+      <div style="font-size:13px; opacity:.7">Booting device…</div>
+    </div>
+  </div>
+  <div id="root"></div>
+
+<script type="module" src="/src/standalone-main.jsx"></script>
+</body>
 </html>
