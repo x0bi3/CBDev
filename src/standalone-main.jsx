@@ -6,7 +6,7 @@ import '@fontsource/inter/700.css';
 
 import React, { createContext, useContext, useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
-import { motion, AnimatePresence, LayoutGroup, useMotionValue, useTransform, Reorder, usePresence } from 'framer-motion';
+import { motion, AnimatePresence, LayoutGroup, useMotionValue, useTransform, Reorder } from 'framer-motion';
 
 /* ========================= THEMES ========================= */
 const themes = {
@@ -74,32 +74,6 @@ const eyeOrder = ['outline','scanner','abstract'];
 /* ========================= CONTEXT ========================= */
 const DeviceCtx = createContext(null);
 const useDevice = () => useContext(DeviceCtx);
-
-/* ========================= DEBUG LOGGING ========================= */
-// Bump LOG_VERSION on every meaningful change so we can verify in the
-// console that the user is actually running the latest build. Format: v<major>.<minor>.
-// Debug logging is on by default during this debug window so the user does not need
-// to flip a flag. Disable with localStorage.setItem('cb-debug','0').
-const LOG_VERSION = 'v2.5';
-const CB_DEBUG = (() => {
-  try {
-    if (typeof window === 'undefined') return false;
-    if (window.location && window.location.search.includes('debug=0')) return false;
-    if (localStorage.getItem('cb-debug') === '0') return false;
-    return true;
-  } catch { return true; }
-})();
-const cbStart = (typeof performance !== 'undefined' ? performance.now() : 0);
-const log = (event, data) => {
-  if (!CB_DEBUG) return;
-  const t = ((typeof performance !== 'undefined' ? performance.now() : 0) - cbStart).toFixed(0);
-  if (data !== undefined) console.log(`[CB ${LOG_VERSION} ${t}ms] ${event}`, data);
-  else console.log(`[CB ${LOG_VERSION} ${t}ms] ${event}`);
-};
-if (typeof window !== 'undefined' && CB_DEBUG) {
-  console.log(`%c[CB ${LOG_VERSION}] debug logging ENABLED. Reproduce the stuck state, then copy every [CB ${LOG_VERSION} ...] line.`,
-    'background:#111;color:#0f0;padding:2px 6px;border-radius:4px;font-weight:bold');
-}
 
 function DeviceProvider({ children }) {
   const [themeId, setThemeId] = useState(() => localStorage.getItem('iphone-portfolio:theme') || 'liquid-glass');
@@ -170,14 +144,13 @@ function DeviceProvider({ children }) {
         if (prevPrev === id)         nextPrev = null;
         else if (curr && curr !== id) nextPrev = curr;
         else                         nextPrev = null;
-        log('openApp', { id, fromOpenAppId: curr, fromPrevAppId: prevPrev, toPrevAppId: nextPrev });
         return nextPrev;
       });
       return id;
     });
   }, []);
   const closeApp = useCallback(() => {
-    setOpenAppId(curr => { log('closeApp', { fromOpenAppId: curr }); return null; });
+    setOpenAppId(curr => null);
     setPrevAppId(null);
   }, []);
 
@@ -1757,8 +1730,7 @@ function StatusBar() {
 }
 
 const HomeIndicator = ({ onClick }) => (
-  <button onClick={onClick ? () => { log('homeIndicator TAP'); onClick(); } : undefined}
-    aria-label={onClick ? 'Close app' : 'Home'}
+  <button onClick={onClick} aria-label={onClick ? 'Close app' : 'Home'}
     className="group relative z-40 mx-auto mb-2 flex h-8 w-full items-end justify-center"
     style={{ paddingBottom:'max(env(safe-area-inset-bottom),8px)' }}>
     <span className="h-[5px] w-[134px] rounded-full bg-white/85 transition-all duration-300 group-hover:bg-white group-active:scale-x-90" />
@@ -1831,7 +1803,6 @@ function Wallpaper({ theme, dimmed }) {
 /* ========================= ICON / GRID / DOCK ========================= */
 function AppIcon({ app, onTap, showLabel = true, size = 62 }) {
   const handle = () => {
-    log('icon TAP', { id: app.id, href: app.href || null });
     if (app.href) window.open(app.href,'_blank','noopener,noreferrer');
     else onTap(app);
   };
@@ -2012,12 +1983,10 @@ function Dock() {
 }
 
 /* ========================= APP VIEW (morph or cross-app slide) ========================= */
-function AppView({ app, onClose, onPresenceChange }) {
+function AppView({ app, isOpen, onClose, onExitComplete }) {
   const { openAppId, prevAppId, openApp, dragLocked } = useDevice();
-  const [isPresent, safeToRemove] = usePresence();
   const View = appViews[app.id];
 
-  // Capture entry mode ONCE at mount so close behavior is stable.
   const entryRef = React.useRef(null);
   if (entryRef.current === null) {
     entryRef.current = {
@@ -2028,113 +1997,68 @@ function AppView({ app, onClose, onPresenceChange }) {
   const { crossNav: enteredViaCrossNav, fromAppId } = entryRef.current;
   const fromApp = fromAppId ? getApp(fromAppId) : null;
 
-  // Lock exit mode the moment this view stops being the active app. Without this,
-  // a still-mounted exiting AppView re-renders on every openAppId change and can
-  // flip isBeingReplaced back to false (e.g. close → open another → close again),
-  // which restores layoutId mid-exit and strands the view at fullscreen.
-  const exitModeRef = React.useRef(null);
-  if (openAppId !== app.id) {
-    if (!exitModeRef.current) {
-      exitModeRef.current = openAppId ? 'replaced' : 'closed';
-      log('AppView exitMode LOCK', { id: app.id, mode: exitModeRef.current, openAppId });
-    } else if (exitModeRef.current === 'closed' && openAppId) {
-      exitModeRef.current = 'replaced';
-      log('AppView exitMode UPGRADE', { id: app.id, openAppId });
-    }
-  }
-  const isBeingReplaced = exitModeRef.current === 'replaced';
-  const isExiting = exitModeRef.current !== null;
-  // layoutId is open-only. Any exit (closed or replaced) uses explicit tweens so
-  // two AppViews never share the LayoutGroup projection slot at once.
-  const skipMorph = enteredViaCrossNav || isExiting;
+  const tileLayoutIdRef = React.useRef(
+    enteredViaCrossNav ? undefined : ('app-tile-' + app.id)
+  );
+  const usesLayoutMorph = isOpen && !!tileLayoutIdRef.current;
+  const isReplaced = !isOpen && !!openAppId;
+
+  const openTarget = usesLayoutMorph ? undefined : { x: 0, opacity: 1, scale: 1 };
+  const closeTarget = enteredViaCrossNav
+    ? { y: 80, opacity: 0, scale: 0.96 }
+    : { opacity: 0, scale: 0.94 };
+  const replaceTarget = { x: '-22%', opacity: 0 };
+  const animateTarget = isOpen ? openTarget : (isReplaced ? replaceTarget : closeTarget);
+
+  const containerTransition = isReplaced
+    ? { type:'tween', duration:0.32, ease:[0.4,0,0.2,1] }
+    : !isOpen && enteredViaCrossNav
+      ? { type:'tween', duration:0.42, ease:[0.22,1,0.36,1] }
+      : !isOpen
+        ? { type:'tween', duration:0.28, ease:[0.32,0.72,0,1] }
+        : usesLayoutMorph
+          ? { type:'tween', duration:0.30, ease:[0.32,0.72,0,1] }
+          : enteredViaCrossNav
+            ? { type:'tween', duration:0.42, ease:[0.22,1,0.36,1] }
+            : { type:'tween', duration:0.30, ease:[0.32,0.72,0,1] };
 
   const y = useMotionValue(0);
   const scale = useTransform(y, [0,300], [1,0.85]);
   const opacity = useTransform(y, [0,300], [1,0.4]);
+
   useEffect(() => {
-    onPresenceChange?.(1);
-    log('AppView MOUNT', { id: app.id, openAppId, prevAppId, skipMorph, enteredViaCrossNav, isBeingReplaced, isExiting });
     document.body.style.overflow = 'hidden';
-    return () => {
-      onPresenceChange?.(-1);
-      log('AppView UNMOUNT', { id: app.id });
-      document.body.style.overflow = '';
-    };
-  }, [onPresenceChange]);
+    return () => { document.body.style.overflow = ''; };
+  }, []);
 
-  // Frozen for the whole mount — never clear layoutId mid-exit; toggling it was
-  // confusing AnimatePresence after the exit tween finished.
-  const tileLayoutIdRef = React.useRef(
-    enteredViaCrossNav ? undefined : ('app-tile-' + app.id)
-  );
-  const containerLayoutId = tileLayoutIdRef.current;
-  const usesLayoutMorph = !!containerLayoutId && !isExiting;
+  const exitingRef = React.useRef(false);
+  const exitDoneRef = React.useRef(false);
+  if (!isOpen) exitingRef.current = true;
 
-  // Exit animation must be defined from the first render while the view is open.
-  // AnimatePresence snapshots exit when the child is removed; if it was undefined
-  // on the prior open frame, no exit runs and the view strands at opacity 1.
-  const exitAnimRef = React.useRef(null);
-  if (exitAnimRef.current === null) {
-    exitAnimRef.current = enteredViaCrossNav
-      ? { y: 80, opacity: 0, scale: 0.96, transition: { type:'tween', duration:0.42, ease:[0.22,1,0.36,1] } }
-      : { opacity: 0, scale: 0.94, transition: { type:'tween', duration:0.28, ease:[0.32,0.72,0,1] } };
-  }
-  if (exitModeRef.current === 'replaced') {
-    exitAnimRef.current = { x: '-22%', opacity: 0, transition: { type:'tween', duration:0.32, ease:[0.4,0,0.2,1] } };
-  }
-
-  const containerInitial = enteredViaCrossNav ? { x: '100%', opacity: 0.6, scale: 1 } : false;
-  // Never pass animate while exiting — animate={{ opacity: 1 }} was overriding exit.
-  const containerAnimate = isExiting ? undefined : (usesLayoutMorph ? undefined : { x: 0, opacity: 1, scale: 1 });
-  const containerTransition = usesLayoutMorph
-    ? { type:'tween', duration:0.30, ease:[0.32,0.72,0,1] }
-    : enteredViaCrossNav
-      ? { type:'tween', duration:0.42, ease:[0.22,1,0.36,1] }
-      : { type:'tween', duration:0.30, ease:[0.32,0.72,0,1] };
-
-  log('AppView RENDER', { id: app.id, layoutId: containerLayoutId, exitMode: exitModeRef.current, isExiting });
-  // Two-layer structure (deliberate): the OUTER motion.div owns the layoutId
-  // morph and the open/close/cross-nav animation (initial/animate/exit). The
-  // INNER motion.div owns drag-to-dismiss feedback via motion values for y,
-  // scale, and opacity. They are kept on different elements because driving
-  // the same prop from both `style` (motion value) and `animate`/`initial`/`exit`
-  // (fixed numbers) produced "undefined" reads during framer-motion's layoutId
-  // projection snapshot, which the browser logged as `style.borderTopLeftRadius:
-  // undefined`, `style.opacity: undefined`, etc.
   return (
-    <motion.div layoutId={containerLayoutId}
-      data-cb-appview={app.id}
+    <motion.div layoutId={usesLayoutMorph ? tileLayoutIdRef.current : undefined}
       className="fixed inset-0 z-40 overflow-hidden bg-neutral-950"
-      // When we entered via cross-nav (no morph) there's no reason to show the source tile
-      // gradient — go straight to the dark app background to avoid a flash of pink/blue.
-      // When we DO morph from the home icon we need the tile colour briefly so the
-      // layoutId animation has matching colours between source and destination.
-      style={{ background: skipMorph ? '#0a0a0a' : app.tile, borderRadius: 0, pointerEvents: isExiting ? 'none' : 'auto' }}
-      initial={containerInitial}
-      {...(containerAnimate !== undefined ? { animate: containerAnimate } : {})}
-      exit={exitAnimRef.current}
-      onAnimationStart={(def) => log('AppView animStart', { id: app.id, def, isPresent })}
-      onAnimationComplete={(def) => {
-        log('AppView animComplete', { id: app.id, def, isPresent });
-        if (!isPresent) {
-          log('AppView safeToRemove', { id: app.id });
-          safeToRemove();
-        }
+      style={{
+        background: (enteredViaCrossNav || !isOpen) ? '#0a0a0a' : app.tile,
+        borderRadius: 0,
+        pointerEvents: isOpen ? 'auto' : 'none',
       }}
-      onLayoutAnimationStart={() => log('AppView layoutStart', { id: app.id })}
-      onLayoutAnimationComplete={() => log('AppView layoutComplete', { id: app.id })}
-      transition={containerTransition}>
+      initial={enteredViaCrossNav ? { x: '100%', opacity: 0.6, scale: 1 } : false}
+      {...(animateTarget !== undefined ? { animate: animateTarget } : {})}
+      transition={containerTransition}
+      onAnimationComplete={() => {
+        if (!isOpen && exitingRef.current && !exitDoneRef.current) {
+          exitDoneRef.current = true;
+          onExitComplete();
+        }
+      }}>
       <motion.div
         className="absolute inset-0"
         style={{ y, scale, opacity }}
-        drag={(skipMorph || dragLocked) ? false : 'y'}
+        drag={(enteredViaCrossNav || !isOpen || dragLocked) ? false : 'y'}
         dragConstraints={{ top:0, bottom:0 }}
         dragElastic={{ top:0, bottom:0.6 }}
         onDragEnd={(_, info) => { if (info.offset.y > 140 || info.velocity.y > 600) onClose(); }}>
-      {/* Header and section render at full opacity from t=0 so the page content is
-          visible throughout the morph (iOS-style: content scales with the icon as it
-          expands). The section's bg-neutral-950 immediately covers the tile gradient
-          inside the morphing container so we don't need a separate dark overlay. */}
       <motion.header
         initial={enteredViaCrossNav ? { opacity:0 } : false}
         animate={{ opacity:1 }}
@@ -2155,7 +2079,7 @@ function AppView({ app, onClose, onPresenceChange }) {
             <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl text-[20px]" style={{ background:app.tile }}>{app.glyph}</div>
             <h1 className="truncate text-[17px] font-semibold text-white">{app.label}</h1>
           </div>
-          <button onClick={() => { log('close X TAP', { id: app.id }); onClose(); }} aria-label="Close"
+          <button onClick={onClose} aria-label="Close"
             className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-white/15 text-white backdrop-blur-md transition hover:bg-white/25 active:scale-90">
             <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
               <path d="M6 6 L18 18 M18 6 L6 18" />
@@ -2614,39 +2538,27 @@ function MiniPlayer() {
 function Device() {
   const { themeId, openAppId, closeApp, audioRef } = useDevice();
   const theme = themes[themeId];
-  const [appPresenceCount, setAppPresenceCount] = useState(0);
-  const onAppPresence = useCallback((delta) => {
-    setAppPresenceCount(c => Math.max(0, c + delta));
-  }, []);
+  const [shellAppId, setShellAppId] = useState(null);
 
-  // Whenever openAppId changes, log the new value and 800ms later count how
-  // many [data-cb-appview] containers are actually in the DOM. If openAppId is
-  // null but a container is still mounted, we're stranded — that's the stuck
-  // bug, captured automatically.
+  // Open: mount the shell when home requests an app and nothing is showing yet.
   useEffect(() => {
-    log('Device openAppId changed', { openAppId });
-    const t = setTimeout(() => {
-      if (typeof document === 'undefined') return;
-      const mounted = Array.from(document.querySelectorAll('[data-cb-appview]')).map(el => el.getAttribute('data-cb-appview'));
-      log('Device DOM check', { openAppId, mountedAppViews: mounted });
-      if (!openAppId && mounted.length > 0) {
-        console.warn(`[CB ${LOG_VERSION} STUCK] openAppId is null but AppView still in DOM:`, mounted);
-        document.querySelectorAll('[data-cb-appview]').forEach(el => {
-          const cs = el.getAttribute('style') || '(none)';
-          const r = el.getBoundingClientRect();
-          console.warn(`[CB ${LOG_VERSION} STUCK] stranded id=${el.getAttribute('data-cb-appview')} rect=${r.width}x${r.height}@${r.left},${r.top} style="${cs}"`);
-        });
-      }
-      if (openAppId && mounted.length > 1) {
-        console.warn(`[CB ${LOG_VERSION} OVERLAP] multiple AppViews mounted simultaneously:`, mounted);
-      }
-    }, 800);
-    return () => clearTimeout(t);
+    if (openAppId && !shellAppId) setShellAppId(openAppId);
+  }, [openAppId, shellAppId]);
+
+  const shellApp = shellAppId ? getApp(shellAppId) : null;
+  const isShellOpen = !!openAppId && openAppId === shellAppId;
+
+  const handleShellExitComplete = useCallback(() => {
+    setShellAppId(prev => {
+      if (!openAppId) return null;
+      if (openAppId !== prev) return openAppId;
+      return null;
+    });
   }, [openAppId]);
-  const openedApp = openAppId ? getApp(openAppId) : null;
+
   return (
     <div className="relative h-full w-full overflow-hidden font-sf">
-      <Wallpaper theme={theme} dimmed={appPresenceCount > 0} />
+      <Wallpaper theme={theme} dimmed={!!shellAppId} />
       <LayoutGroup>
         <div className="pointer-events-none absolute inset-x-0 top-0 z-50">
           {/* Legibility scrim: fades dark-translucent → transparent so the white
@@ -2667,12 +2579,15 @@ function Device() {
           <Dock />
           <HomeIndicator onClick={openAppId ? closeApp : undefined} />
         </div>
-        {/* sync (default): allow the next app to enter while the previous one exits.
-            mode="wait" deadlocked when an exit was corrupted; frozen exitModeRef
-            keeps each exiting view's animation props stable regardless. */}
-        <AnimatePresence>
-          {openedApp && <AppView key={openedApp.id} app={openedApp} onClose={closeApp} onPresenceChange={onAppPresence} />}
-        </AnimatePresence>
+        {shellApp && (
+          <AppView
+            key={shellAppId}
+            app={shellApp}
+            isOpen={isShellOpen}
+            onClose={closeApp}
+            onExitComplete={handleShellExitComplete}
+          />
+        )}
         <AuthSheet />
         <MiniPlayer />
       </LayoutGroup>
