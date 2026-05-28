@@ -76,25 +76,29 @@ const DeviceCtx = createContext(null);
 const useDevice = () => useContext(DeviceCtx);
 
 /* ========================= DEBUG LOGGING ========================= */
-// Toggle with `localStorage.setItem('cb-debug','1')` and reload, or it auto-enables
-// when ?debug=1 is in the URL. Logs are prefixed with [CB <ms>] and the event name
-// so the user can copy/paste a contiguous block when reproducing a stuck state.
+// Bump LOG_VERSION on every meaningful change so we can verify in the
+// console that the user is actually running the latest build. Format: v<major>.<minor>.
+// Debug logging is on by default during this debug window so the user does not need
+// to flip a flag. Disable with localStorage.setItem('cb-debug','0').
+const LOG_VERSION = 'v2.0';
 const CB_DEBUG = (() => {
   try {
     if (typeof window === 'undefined') return false;
-    if (window.location && window.location.search.includes('debug=1')) return true;
-    return localStorage.getItem('cb-debug') === '1';
-  } catch { return false; }
+    if (window.location && window.location.search.includes('debug=0')) return false;
+    if (localStorage.getItem('cb-debug') === '0') return false;
+    return true;
+  } catch { return true; }
 })();
 const cbStart = (typeof performance !== 'undefined' ? performance.now() : 0);
 const log = (event, data) => {
   if (!CB_DEBUG) return;
   const t = ((typeof performance !== 'undefined' ? performance.now() : 0) - cbStart).toFixed(0);
-  if (data !== undefined) console.log(`[CB ${t}ms] ${event}`, data);
-  else console.log(`[CB ${t}ms] ${event}`);
+  if (data !== undefined) console.log(`[CB ${LOG_VERSION} ${t}ms] ${event}`, data);
+  else console.log(`[CB ${LOG_VERSION} ${t}ms] ${event}`);
 };
 if (typeof window !== 'undefined' && CB_DEBUG) {
-  console.log('[CB] debug logging ENABLED. Reproduce the stuck state, then copy the [CB ...] lines.');
+  console.log(`%c[CB ${LOG_VERSION}] debug logging ENABLED. Reproduce the stuck state, then copy every [CB ${LOG_VERSION} ...] line.`,
+    'background:#111;color:#0f0;padding:2px 6px;border-radius:4px;font-weight:bold');
 }
 
 function DeviceProvider({ children }) {
@@ -2595,10 +2599,15 @@ function Device() {
       const mounted = Array.from(document.querySelectorAll('[data-cb-appview]')).map(el => el.getAttribute('data-cb-appview'));
       log('Device DOM check', { openAppId, mountedAppViews: mounted });
       if (!openAppId && mounted.length > 0) {
-        console.warn('[CB STUCK] openAppId is null but AppView still in DOM:', mounted);
+        console.warn(`[CB ${LOG_VERSION} STUCK] openAppId is null but AppView still in DOM:`, mounted);
+        document.querySelectorAll('[data-cb-appview]').forEach(el => {
+          const cs = el.getAttribute('style') || '(none)';
+          const r = el.getBoundingClientRect();
+          console.warn(`[CB ${LOG_VERSION} STUCK] stranded id=${el.getAttribute('data-cb-appview')} rect=${r.width}x${r.height}@${r.left},${r.top} style="${cs}"`);
+        });
       }
       if (openAppId && mounted.length > 1) {
-        console.warn('[CB OVERLAP] multiple AppViews mounted simultaneously:', mounted);
+        console.warn(`[CB ${LOG_VERSION} OVERLAP] multiple AppViews mounted simultaneously:`, mounted);
       }
     }, 800);
     return () => clearTimeout(t);
