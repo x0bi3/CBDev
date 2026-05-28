@@ -80,7 +80,7 @@ const useDevice = () => useContext(DeviceCtx);
 // console that the user is actually running the latest build. Format: v<major>.<minor>.
 // Debug logging is on by default during this debug window so the user does not need
 // to flip a flag. Disable with localStorage.setItem('cb-debug','0').
-const LOG_VERSION = 'v2.2';
+const LOG_VERSION = 'v2.3';
 const CB_DEBUG = (() => {
   try {
     if (typeof window === 'undefined') return false;
@@ -2012,7 +2012,7 @@ function Dock() {
 }
 
 /* ========================= APP VIEW (morph or cross-app slide) ========================= */
-function AppView({ app, onClose }) {
+function AppView({ app, onClose, onPresenceChange }) {
   const { openAppId, prevAppId, openApp, dragLocked } = useDevice();
   const View = appViews[app.id];
 
@@ -2042,19 +2042,24 @@ function AppView({ app, onClose }) {
     }
   }
   const isBeingReplaced = exitModeRef.current === 'replaced';
-  const skipMorph = enteredViaCrossNav || isBeingReplaced;
+  const isExiting = exitModeRef.current !== null;
+  // layoutId is open-only. Any exit (closed or replaced) uses explicit tweens so
+  // two AppViews never share the LayoutGroup projection slot at once.
+  const skipMorph = enteredViaCrossNav || isExiting;
 
   const y = useMotionValue(0);
   const scale = useTransform(y, [0,300], [1,0.85]);
   const opacity = useTransform(y, [0,300], [1,0.4]);
   useEffect(() => {
-    log('AppView MOUNT', { id: app.id, openAppId, prevAppId, skipMorph, enteredViaCrossNav, isBeingReplaced });
+    onPresenceChange?.(1);
+    log('AppView MOUNT', { id: app.id, openAppId, prevAppId, skipMorph, enteredViaCrossNav, isBeingReplaced, isExiting });
     document.body.style.overflow = 'hidden';
     return () => {
+      onPresenceChange?.(-1);
       log('AppView UNMOUNT', { id: app.id });
       document.body.style.overflow = '';
     };
-  }, []);
+  }, [onPresenceChange]);
 
   const containerLayoutId = skipMorph ? undefined : ('app-tile-' + app.id);
 
@@ -2064,21 +2069,22 @@ function AppView({ app, onClose }) {
   // the icon side has no opacity in its snapshot, so the dual source of truth made
   // framer-motion write style.opacity: undefined during projection.
   const containerAnimate = usesLayoutMorph ? undefined : { x: 0, opacity: 1, scale: 1 };
-  // Exit: if being replaced by another app, slide out left.
-  // If being closed (X) and we entered via cross-nav, slide down + fade (no icon to morph to).
-  // Otherwise let layoutId handle the morph back to the home icon.
   const containerExit = isBeingReplaced
     ? { x: '-22%', opacity: 0 }
-    : (enteredViaCrossNav ? { y: 80, opacity: 0, scale: 0.96 } : undefined);
-  // Tween (not spring) for the open/close layout morph so timing is bounded and
-  // identical every cycle. Springs can take longer to settle when interrupted,
-  // which is what was leaving the layoutId tracker in a stale state during
-  // rapid app-to-app cycling on mobile.
-  const containerTransition = enteredViaCrossNav && !isBeingReplaced
-    ? { type:'tween', duration:0.42, ease:[0.22,1,0.36,1] }
-    : isBeingReplaced
-      ? { type:'tween', duration:0.32, ease:[0.4,0,0.2,1] }
-      : { type:'tween', duration:0.30, ease:[0.32,0.72,0,1] };
+    : isExiting && enteredViaCrossNav
+      ? { y: 80, opacity: 0, scale: 0.96 }
+      : isExiting
+        ? { opacity: 0, scale: 0.94 }
+        : undefined;
+  const containerTransition = isBeingReplaced
+    ? { type:'tween', duration:0.32, ease:[0.4,0,0.2,1] }
+    : isExiting && enteredViaCrossNav
+      ? { type:'tween', duration:0.42, ease:[0.22,1,0.36,1] }
+      : isExiting
+        ? { type:'tween', duration:0.28, ease:[0.32,0.72,0,1] }
+        : enteredViaCrossNav
+          ? { type:'tween', duration:0.42, ease:[0.22,1,0.36,1] }
+          : { type:'tween', duration:0.30, ease:[0.32,0.72,0,1] };
 
   log('AppView RENDER', { id: app.id, layoutId: containerLayoutId, hasExplicitExit: containerExit !== undefined, exitMode: exitModeRef.current });
   // Two-layer structure (deliberate): the OUTER motion.div owns the layoutId
@@ -2598,6 +2604,10 @@ function MiniPlayer() {
 function Device() {
   const { themeId, openAppId, closeApp, audioRef } = useDevice();
   const theme = themes[themeId];
+  const [appPresenceCount, setAppPresenceCount] = useState(0);
+  const onAppPresence = useCallback((delta) => {
+    setAppPresenceCount(c => Math.max(0, c + delta));
+  }, []);
 
   // Whenever openAppId changes, log the new value and 800ms later count how
   // many [data-cb-appview] containers are actually in the DOM. If openAppId is
@@ -2626,7 +2636,7 @@ function Device() {
   const openedApp = openAppId ? getApp(openAppId) : null;
   return (
     <div className="relative h-full w-full overflow-hidden font-sf">
-      <Wallpaper theme={theme} dimmed={!!openAppId} />
+      <Wallpaper theme={theme} dimmed={appPresenceCount > 0} />
       <LayoutGroup>
         <div className="pointer-events-none absolute inset-x-0 top-0 z-50">
           {/* Legibility scrim: fades dark-translucent → transparent so the white
@@ -2651,7 +2661,7 @@ function Device() {
             mode="wait" deadlocked when an exit was corrupted; frozen exitModeRef
             keeps each exiting view's animation props stable regardless. */}
         <AnimatePresence>
-          {openedApp && <AppView key={openedApp.id} app={openedApp} onClose={closeApp} />}
+          {openedApp && <AppView key={openedApp.id} app={openedApp} onClose={closeApp} onPresenceChange={onAppPresence} />}
         </AnimatePresence>
         <AuthSheet />
         <MiniPlayer />
