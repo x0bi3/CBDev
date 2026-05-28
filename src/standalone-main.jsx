@@ -6,7 +6,7 @@ import '@fontsource/inter/700.css';
 
 import React, { createContext, useContext, useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
-import { motion, AnimatePresence, LayoutGroup, useMotionValue, useTransform, Reorder } from 'framer-motion';
+import { motion, AnimatePresence, LayoutGroup, useMotionValue, useTransform, Reorder, useAnimationControls } from 'framer-motion';
 
 /* ========================= THEMES ========================= */
 const themes = {
@@ -2000,27 +2000,52 @@ function AppView({ app, isOpen, onClose, onExitComplete }) {
   const tileLayoutIdRef = React.useRef(
     enteredViaCrossNav ? undefined : ('app-tile-' + app.id)
   );
-  const usesLayoutMorph = isOpen && !!tileLayoutIdRef.current;
   const isReplaced = !isOpen && !!openAppId;
-
-  const openTarget = usesLayoutMorph ? undefined : { x: 0, opacity: 1, scale: 1 };
   const closeTarget = enteredViaCrossNav
     ? { y: 80, opacity: 0, scale: 0.96 }
     : { opacity: 0, scale: 0.94 };
   const replaceTarget = { x: '-22%', opacity: 0 };
-  const animateTarget = isOpen ? openTarget : (isReplaced ? replaceTarget : closeTarget);
-
-  const containerTransition = isReplaced
+  const closeTransition = isReplaced
     ? { type:'tween', duration:0.32, ease:[0.4,0,0.2,1] }
-    : !isOpen && enteredViaCrossNav
+    : enteredViaCrossNav
       ? { type:'tween', duration:0.42, ease:[0.22,1,0.36,1] }
-      : !isOpen
-        ? { type:'tween', duration:0.28, ease:[0.32,0.72,0,1] }
-        : usesLayoutMorph
-          ? { type:'tween', duration:0.30, ease:[0.32,0.72,0,1] }
-          : enteredViaCrossNav
-            ? { type:'tween', duration:0.42, ease:[0.22,1,0.36,1] }
-            : { type:'tween', duration:0.30, ease:[0.32,0.72,0,1] };
+      : { type:'tween', duration:0.28, ease:[0.32,0.72,0,1] };
+
+  const controls = useAnimationControls();
+  const exitDoneRef = React.useRef(false);
+
+  // Drive close explicitly. After a layoutId open, animate was omitted so flipping
+  // isOpen via the X button never started a close tween — pointer-events went
+  // none immediately and onAnimationComplete never fired (Escape often worked
+  // because it was pressed after the layout morph had fully settled).
+  useEffect(() => {
+    if (isOpen) {
+      exitDoneRef.current = false;
+      if (enteredViaCrossNav) {
+        controls.start({ x: 0, opacity: 1, scale: 1, transition: { type:'tween', duration:0.42, ease:[0.22,1,0.36,1] } });
+      } else if (!tileLayoutIdRef.current) {
+        controls.start({ x: 0, opacity: 1, scale: 1, transition: { type:'tween', duration:0.30, ease:[0.32,0.72,0,1] } });
+      } else {
+        controls.start({ opacity: 1, scale: 1 });
+      }
+      return;
+    }
+    const target = isReplaced ? replaceTarget : closeTarget;
+    let cancelled = false;
+    controls.start({ ...target, transition: closeTransition }).then(() => {
+      if (!cancelled && !exitDoneRef.current) {
+        exitDoneRef.current = true;
+        onExitComplete();
+      }
+    });
+    const fallback = setTimeout(() => {
+      if (!cancelled && !exitDoneRef.current) {
+        exitDoneRef.current = true;
+        onExitComplete();
+      }
+    }, 400);
+    return () => { cancelled = true; clearTimeout(fallback); };
+  }, [isOpen, isReplaced, enteredViaCrossNav, controls, onExitComplete]);
 
   const y = useMotionValue(0);
   const scale = useTransform(y, [0,300], [1,0.85]);
@@ -2031,12 +2056,10 @@ function AppView({ app, isOpen, onClose, onExitComplete }) {
     return () => { document.body.style.overflow = ''; };
   }, []);
 
-  const exitingRef = React.useRef(false);
-  const exitDoneRef = React.useRef(false);
-  if (!isOpen) exitingRef.current = true;
+  const layoutId = isOpen && tileLayoutIdRef.current ? tileLayoutIdRef.current : undefined;
 
   return (
-    <motion.div layoutId={usesLayoutMorph ? tileLayoutIdRef.current : undefined}
+    <motion.div layoutId={layoutId}
       className="fixed inset-0 z-40 overflow-hidden bg-neutral-950"
       style={{
         background: (enteredViaCrossNav || !isOpen) ? '#0a0a0a' : app.tile,
@@ -2044,14 +2067,7 @@ function AppView({ app, isOpen, onClose, onExitComplete }) {
         pointerEvents: isOpen ? 'auto' : 'none',
       }}
       initial={enteredViaCrossNav ? { x: '100%', opacity: 0.6, scale: 1 } : false}
-      {...(animateTarget !== undefined ? { animate: animateTarget } : {})}
-      transition={containerTransition}
-      onAnimationComplete={() => {
-        if (!isOpen && exitingRef.current && !exitDoneRef.current) {
-          exitDoneRef.current = true;
-          onExitComplete();
-        }
-      }}>
+      animate={controls}>
       <motion.div
         className="absolute inset-0"
         style={{ y, scale, opacity }}
@@ -2079,7 +2095,7 @@ function AppView({ app, isOpen, onClose, onExitComplete }) {
             <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl text-[20px]" style={{ background:app.tile }}>{app.glyph}</div>
             <h1 className="truncate text-[17px] font-semibold text-white">{app.label}</h1>
           </div>
-          <button onClick={onClose} aria-label="Close"
+          <button type="button" onClick={onClose} aria-label="Close"
             className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-white/15 text-white backdrop-blur-md transition hover:bg-white/25 active:scale-90">
             <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
               <path d="M6 6 L18 18 M18 6 L6 18" />
@@ -2548,13 +2564,17 @@ function Device() {
   const shellApp = shellAppId ? getApp(shellAppId) : null;
   const isShellOpen = !!openAppId && openAppId === shellAppId;
 
+  const openAppIdRef = useRef(openAppId);
+  openAppIdRef.current = openAppId;
+
   const handleShellExitComplete = useCallback(() => {
     setShellAppId(prev => {
-      if (!openAppId) return null;
-      if (openAppId !== prev) return openAppId;
+      const next = openAppIdRef.current;
+      if (!next) return null;
+      if (next !== prev) return next;
       return null;
     });
-  }, [openAppId]);
+  }, []);
 
   return (
     <div className="relative h-full w-full overflow-hidden font-sf">
