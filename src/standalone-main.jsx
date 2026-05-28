@@ -80,7 +80,7 @@ const useDevice = () => useContext(DeviceCtx);
 // console that the user is actually running the latest build. Format: v<major>.<minor>.
 // Debug logging is on by default during this debug window so the user does not need
 // to flip a flag. Disable with localStorage.setItem('cb-debug','0').
-const LOG_VERSION = 'v2.0';
+const LOG_VERSION = 'v2.1';
 const CB_DEBUG = (() => {
   try {
     if (typeof window === 'undefined') return false;
@@ -163,24 +163,6 @@ function DeviceProvider({ children }) {
     else localStorage.removeItem('iphone-portfolio:auth');
   }, [auth]);
 
-  useEffect(() => {
-    const onKey = e => {
-      if (e.key === 'Escape') {
-        if (authOpen) { setAuthOpen(false); return; }
-        if (miniPlayerOpen) { setMiniPlayerOpen(false); return; }
-        if (ccOpen) { setCcOpen(false); return; }
-        setOpenAppId(null);
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [authOpen, miniPlayerOpen, ccOpen]);
-
-  // Forward / back-aware navigation.
-  //   - Opening fresh from home: no back trail.
-  //   - Navigating from app A to app B: B remembers A as its back target.
-  //   - Navigating from B back to A (the recorded prev): clear the trail entirely,
-  //     otherwise A would show a "Back to B" button → infinite ping-pong loop.
   const openApp = useCallback((id) => {
     setOpenAppId(curr => {
       setPrevAppId(prevPrev => {
@@ -198,6 +180,19 @@ function DeviceProvider({ children }) {
     setOpenAppId(curr => { log('closeApp', { fromOpenAppId: curr }); return null; });
     setPrevAppId(null);
   }, []);
+
+  useEffect(() => {
+    const onKey = e => {
+      if (e.key === 'Escape') {
+        if (authOpen) { setAuthOpen(false); return; }
+        if (miniPlayerOpen) { setMiniPlayerOpen(false); return; }
+        if (ccOpen) { setCcOpen(false); return; }
+        closeApp();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [authOpen, miniPlayerOpen, ccOpen, closeApp]);
 
   const setAppOrder = useCallback((next) => setAppOrderState(next), []);
   const resetAppOrder = useCallback(() => {
@@ -2031,7 +2026,21 @@ function AppView({ app, onClose }) {
   const { crossNav: enteredViaCrossNav, fromAppId } = entryRef.current;
   const fromApp = fromAppId ? getApp(fromAppId) : null;
 
-  const isBeingReplaced = !!openAppId && openAppId !== app.id;
+  // Lock exit mode the moment this view stops being the active app. Without this,
+  // a still-mounted exiting AppView re-renders on every openAppId change and can
+  // flip isBeingReplaced back to false (e.g. close → open another → close again),
+  // which restores layoutId mid-exit and strands the view at fullscreen.
+  const exitModeRef = React.useRef(null);
+  if (openAppId !== app.id) {
+    if (!exitModeRef.current) {
+      exitModeRef.current = openAppId ? 'replaced' : 'closed';
+      log('AppView exitMode LOCK', { id: app.id, mode: exitModeRef.current, openAppId });
+    } else if (exitModeRef.current === 'closed' && openAppId) {
+      exitModeRef.current = 'replaced';
+      log('AppView exitMode UPGRADE', { id: app.id, openAppId });
+    }
+  }
+  const isBeingReplaced = exitModeRef.current === 'replaced';
   const skipMorph = enteredViaCrossNav || isBeingReplaced;
 
   const y = useMotionValue(0);
@@ -2068,7 +2077,7 @@ function AppView({ app, onClose }) {
       ? { type:'tween', duration:0.32, ease:[0.4,0,0.2,1] }
       : { type:'tween', duration:0.30, ease:[0.32,0.72,0,1] };
 
-  log('AppView RENDER', { id: app.id, layoutId: containerLayoutId, hasExplicitExit: containerExit !== undefined });
+  log('AppView RENDER', { id: app.id, layoutId: containerLayoutId, hasExplicitExit: containerExit !== undefined, exitMode: exitModeRef.current });
   // Two-layer structure (deliberate): the OUTER motion.div owns the layoutId
   // morph and the open/close/cross-nav animation (initial/animate/exit). The
   // INNER motion.div owns drag-to-dismiss feedback via motion values for y,
@@ -2636,10 +2645,10 @@ function Device() {
           <Dock />
           <HomeIndicator onClick={openAppId ? closeApp : undefined} />
         </div>
-        {/* mode="wait" forces a closing AppView to fully complete its exit morph before
-            a new one mounts. Prevents the layoutId pile-up that left the previous app
-            stranded at fullscreen (the "stuck gray screen" bug) when cycling fast. */}
-        <AnimatePresence mode="wait">
+        {/* sync (default): allow the next app to enter while the previous one exits.
+            mode="wait" deadlocked when an exit was corrupted; frozen exitModeRef
+            keeps each exiting view's animation props stable regardless. */}
+        <AnimatePresence>
           {openedApp && <AppView key={openedApp.id} app={openedApp} onClose={closeApp} />}
         </AnimatePresence>
         <AuthSheet />
