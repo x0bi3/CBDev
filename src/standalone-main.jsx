@@ -2017,11 +2017,15 @@ function AppView({ app, onClose }) {
   const containerExit = isBeingReplaced
     ? { x: '-22%', opacity: 0 }
     : (enteredViaCrossNav ? { y: 80, opacity: 0, scale: 0.96 } : undefined);
+  // Tween (not spring) for the open/close layout morph so timing is bounded and
+  // identical every cycle. Springs can take longer to settle when interrupted,
+  // which is what was leaving the layoutId tracker in a stale state during
+  // rapid app-to-app cycling on mobile.
   const containerTransition = enteredViaCrossNav && !isBeingReplaced
     ? { type:'tween', duration:0.42, ease:[0.22,1,0.36,1] }
     : isBeingReplaced
-      ? { type:'tween', duration:0.34, ease:[0.4,0,0.2,1] }
-      : { type:'spring', stiffness:360, damping:34 };
+      ? { type:'tween', duration:0.32, ease:[0.4,0,0.2,1] }
+      : { type:'tween', duration:0.30, ease:[0.32,0.72,0,1] };
 
   return (
     <motion.div layoutId={containerLayoutId}
