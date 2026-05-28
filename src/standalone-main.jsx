@@ -75,6 +75,28 @@ const eyeOrder = ['outline','scanner','abstract'];
 const DeviceCtx = createContext(null);
 const useDevice = () => useContext(DeviceCtx);
 
+/* ========================= DEBUG LOGGING ========================= */
+// Toggle with `localStorage.setItem('cb-debug','1')` and reload, or it auto-enables
+// when ?debug=1 is in the URL. Logs are prefixed with [CB <ms>] and the event name
+// so the user can copy/paste a contiguous block when reproducing a stuck state.
+const CB_DEBUG = (() => {
+  try {
+    if (typeof window === 'undefined') return false;
+    if (window.location && window.location.search.includes('debug=1')) return true;
+    return localStorage.getItem('cb-debug') === '1';
+  } catch { return false; }
+})();
+const cbStart = (typeof performance !== 'undefined' ? performance.now() : 0);
+const log = (event, data) => {
+  if (!CB_DEBUG) return;
+  const t = ((typeof performance !== 'undefined' ? performance.now() : 0) - cbStart).toFixed(0);
+  if (data !== undefined) console.log(`[CB ${t}ms] ${event}`, data);
+  else console.log(`[CB ${t}ms] ${event}`);
+};
+if (typeof window !== 'undefined' && CB_DEBUG) {
+  console.log('[CB] debug logging ENABLED. Reproduce the stuck state, then copy the [CB ...] lines.');
+}
+
 function DeviceProvider({ children }) {
   const [themeId, setThemeId] = useState(() => localStorage.getItem('iphone-portfolio:theme') || 'liquid-glass');
   const [eyeId, setEyeId] = useState(() => localStorage.getItem('iphone-portfolio:eye') || 'outline');
@@ -158,14 +180,20 @@ function DeviceProvider({ children }) {
   const openApp = useCallback((id) => {
     setOpenAppId(curr => {
       setPrevAppId(prevPrev => {
-        if (prevPrev === id)         return null;   // ← we are going back, drop the trail
-        if (curr && curr !== id)     return curr;   // → forward nav, remember where we came from
-        return null;                                // first open or re-tap same app
+        let nextPrev;
+        if (prevPrev === id)         nextPrev = null;
+        else if (curr && curr !== id) nextPrev = curr;
+        else                         nextPrev = null;
+        log('openApp', { id, fromOpenAppId: curr, fromPrevAppId: prevPrev, toPrevAppId: nextPrev });
+        return nextPrev;
       });
       return id;
     });
   }, []);
-  const closeApp = useCallback(() => { setOpenAppId(null); setPrevAppId(null); }, []);
+  const closeApp = useCallback(() => {
+    setOpenAppId(curr => { log('closeApp', { fromOpenAppId: curr }); return null; });
+    setPrevAppId(null);
+  }, []);
 
   const setAppOrder = useCallback((next) => setAppOrderState(next), []);
   const resetAppOrder = useCallback(() => {
@@ -1728,7 +1756,8 @@ function StatusBar() {
 }
 
 const HomeIndicator = ({ onClick }) => (
-  <button onClick={onClick} aria-label={onClick ? 'Close app' : 'Home'}
+  <button onClick={onClick ? () => { log('homeIndicator TAP'); onClick(); } : undefined}
+    aria-label={onClick ? 'Close app' : 'Home'}
     className="group relative z-40 mx-auto mb-2 flex h-8 w-full items-end justify-center"
     style={{ paddingBottom:'max(env(safe-area-inset-bottom),8px)' }}>
     <span className="h-[5px] w-[134px] rounded-full bg-white/85 transition-all duration-300 group-hover:bg-white group-active:scale-x-90" />
@@ -1801,6 +1830,7 @@ function Wallpaper({ theme, dimmed }) {
 /* ========================= ICON / GRID / DOCK ========================= */
 function AppIcon({ app, onTap, showLabel = true, size = 62 }) {
   const handle = () => {
+    log('icon TAP', { id: app.id, href: app.href || null });
     if (app.href) window.open(app.href,'_blank','noopener,noreferrer');
     else onTap(app);
   };
@@ -2003,7 +2033,14 @@ function AppView({ app, onClose }) {
   const y = useMotionValue(0);
   const scale = useTransform(y, [0,300], [1,0.85]);
   const opacity = useTransform(y, [0,300], [1,0.4]);
-  useEffect(() => { document.body.style.overflow = 'hidden'; return () => { document.body.style.overflow = ''; }; }, []);
+  useEffect(() => {
+    log('AppView MOUNT', { id: app.id, openAppId, prevAppId, skipMorph, enteredViaCrossNav, isBeingReplaced });
+    document.body.style.overflow = 'hidden';
+    return () => {
+      log('AppView UNMOUNT', { id: app.id });
+      document.body.style.overflow = '';
+    };
+  }, []);
 
   const containerLayoutId   = skipMorph ? undefined : ('app-tile-'  + app.id);
   const glyphLayoutId       = skipMorph ? undefined : ('app-glyph-' + app.id);
@@ -2027,8 +2064,10 @@ function AppView({ app, onClose }) {
       ? { type:'tween', duration:0.32, ease:[0.4,0,0.2,1] }
       : { type:'tween', duration:0.30, ease:[0.32,0.72,0,1] };
 
+  log('AppView RENDER', { id: app.id, layoutId: containerLayoutId, hasExplicitExit: containerExit !== undefined });
   return (
     <motion.div layoutId={containerLayoutId}
+      data-cb-appview={app.id}
       className="fixed inset-0 z-40 overflow-hidden bg-neutral-950"
       // When we entered via cross-nav (no morph) there's no reason to show the source tile
       // gradient — go straight to the dark app background to avoid a flash of pink/blue.
@@ -2041,6 +2080,10 @@ function AppView({ app, onClose }) {
       drag={(skipMorph || dragLocked) ? false : 'y'}
       dragConstraints={{ top:0, bottom:0 }} dragElastic={{ top:0, bottom:0.6 }}
       onDragEnd={(_, info) => { if (info.offset.y > 140 || info.velocity.y > 600) onClose(); }}
+      onAnimationStart={(def) => log('AppView animStart', { id: app.id, def })}
+      onAnimationComplete={(def) => log('AppView animComplete', { id: app.id, def })}
+      onLayoutAnimationStart={() => log('AppView layoutStart', { id: app.id })}
+      onLayoutAnimationComplete={() => log('AppView layoutComplete', { id: app.id })}
       transition={containerTransition}>
       {/* Header and section render at full opacity from t=0 so the page content is
           visible throughout the morph (iOS-style: content scales with the icon as it
@@ -2068,7 +2111,7 @@ function AppView({ app, onClose }) {
               className="grid h-9 w-9 shrink-0 place-items-center rounded-xl text-[20px]" style={{ background:app.tile }}>{app.glyph}</motion.div>
             <motion.h1 layoutId={labelLayoutId} className="truncate text-[17px] font-semibold text-white">{app.label}</motion.h1>
           </div>
-          <button onClick={onClose} aria-label="Close"
+          <button onClick={() => { log('close X TAP', { id: app.id }); onClose(); }} aria-label="Close"
             className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-white/15 text-white backdrop-blur-md transition hover:bg-white/25 active:scale-90">
             <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
               <path d="M6 6 L18 18 M18 6 L6 18" />
@@ -2527,6 +2570,26 @@ function MiniPlayer() {
 function Device() {
   const { themeId, openAppId, closeApp, audioRef } = useDevice();
   const theme = themes[themeId];
+
+  // Whenever openAppId changes, log the new value and 800ms later count how
+  // many [data-cb-appview] containers are actually in the DOM. If openAppId is
+  // null but a container is still mounted, we're stranded — that's the stuck
+  // bug, captured automatically.
+  useEffect(() => {
+    log('Device openAppId changed', { openAppId });
+    const t = setTimeout(() => {
+      if (typeof document === 'undefined') return;
+      const mounted = Array.from(document.querySelectorAll('[data-cb-appview]')).map(el => el.getAttribute('data-cb-appview'));
+      log('Device DOM check', { openAppId, mountedAppViews: mounted });
+      if (!openAppId && mounted.length > 0) {
+        console.warn('[CB STUCK] openAppId is null but AppView still in DOM:', mounted);
+      }
+      if (openAppId && mounted.length > 1) {
+        console.warn('[CB OVERLAP] multiple AppViews mounted simultaneously:', mounted);
+      }
+    }, 800);
+    return () => clearTimeout(t);
+  }, [openAppId]);
   const openedApp = openAppId ? getApp(openAppId) : null;
   return (
     <div className="relative h-full w-full overflow-hidden font-sf">
