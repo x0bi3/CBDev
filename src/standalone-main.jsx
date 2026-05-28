@@ -1825,7 +1825,11 @@ function Wallpaper({ theme, dimmed }) {
 }
 
 /* ========================= ICON / GRID / DOCK ========================= */
-function AppIcon({ app, onTap, showLabel = true, size = 62 }) {
+const APP_TILE_SIZE = 62;
+// px integers only on layoutId nodes — rem/% or animated radius breaks mobile Chrome layout morph.
+const APP_TILE_RADIUS_PX = Math.round(APP_TILE_SIZE * 0.28);
+
+function AppIcon({ app, onTap, showLabel = true, size = APP_TILE_SIZE }) {
   const { shellAppId } = useDevice();
   const hideTile = shellAppId === app.id;
   const handle = () => {
@@ -1836,8 +1840,9 @@ function AppIcon({ app, onTap, showLabel = true, size = 62 }) {
     <button onClick={handle} aria-label={'Open ' + app.label}
       className="group flex flex-col items-center gap-1.5 outline-none focus-visible:ring-2 focus-visible:ring-white/70 rounded-2xl">
       <motion.div layoutId={'app-tile-' + app.id} className="icon-shadow relative overflow-hidden"
-        style={{ width:size, height:size, borderRadius:size*0.28, background:app.tile, opacity: hideTile ? 0 : 1 }}
+        style={{ width:size, height:size, borderRadius:0, opacity: hideTile ? 0 : 1 }}
         whileTap={{ scale:0.88 }} transition={{ type:'spring', stiffness:400, damping:28 }}>
+        <div className="absolute inset-0" style={{ background:app.tile, borderRadius:APP_TILE_RADIUS_PX }} />
         <span className="pointer-events-none absolute inset-0"
           style={{ background:'linear-gradient(180deg,rgba(255,255,255,0.28) 0%,rgba(255,255,255,0) 35%,rgba(0,0,0,0.18) 100%)' }} />
         <div className="absolute inset-0 grid place-items-center text-[28px] leading-none text-white">{app.glyph}</div>
@@ -2096,12 +2101,15 @@ function AppView({ app, isOpen, onClose, onExitComplete }) {
     <motion.div layoutId={layoutId}
       className="fixed inset-0 z-40 overflow-hidden"
       style={{
-        ...(useControlsAnimate ? { background:'#0a0a0a', borderRadius:0 } : {}),
+        borderRadius:0,
+        backfaceVisibility:'hidden',
+        WebkitBackfaceVisibility:'hidden',
+        ...(useControlsAnimate ? { background:'#0a0a0a' } : {}),
         pointerEvents: isOpen ? 'auto' : 'none',
       }}
       initial={enteredViaCrossNav ? { x: '100%', opacity: 0.6, scale: 1 } : false}
-      animate={useControlsAnimate ? controls : { borderRadius: isOpen ? 0 : 18 }}
-      transition={{ layout: layoutTween, borderRadius: contentCloseMotion, default: contentCloseMotion }}>
+      animate={useControlsAnimate ? controls : undefined}
+      transition={{ layout: layoutTween, default: contentCloseMotion }}>
       {morphClose && (
         <motion.div
           aria-hidden
