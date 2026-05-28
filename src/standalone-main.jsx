@@ -6,7 +6,7 @@ import '@fontsource/inter/700.css';
 
 import React, { createContext, useContext, useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
-import { motion, AnimatePresence, LayoutGroup, useMotionValue, useTransform, Reorder, LazyMotion, domAnimation } from 'framer-motion';
+import { motion, AnimatePresence, LayoutGroup, useMotionValue, useTransform, Reorder } from 'framer-motion';
 
 /* ========================= THEMES ========================= */
 const themes = {
@@ -2644,11 +2644,9 @@ function Device() {
 
 function App() {
   return (
-    <LazyMotion features={domAnimation}>
-      <DeviceProvider>
-        <Device />
-      </DeviceProvider>
-    </LazyMotion>
+    <DeviceProvider>
+      <Device />
+    </DeviceProvider>
   );
 }
 
