@@ -157,6 +157,7 @@ function DeviceProvider({ children }) {
     setPrevAppId(null);
   }, []);
 
+  // Single app shell: mount on open, unmount after close animation (see AppView).
   useEffect(() => {
     if (openAppId && !shellAppId) setShellAppId(openAppId);
   }, [openAppId, shellAppId]);
@@ -2008,6 +2009,11 @@ function Dock() {
 }
 
 /* ========================= APP VIEW (morph or cross-app slide) ========================= */
+const EASE_OUT = [0.32, 0.72, 0, 1];
+const LAYOUT_CLOSE_S = 0.30;
+const CONTENT_CLOSE_S = 0.30;
+const TILE_CLOSE_S = 1.30; // 1s longer than content so tile lingers during morph-back
+
 function AppView({ app, isOpen, onClose, onExitComplete }) {
   const { openAppId, prevAppId, openApp, dragLocked } = useDevice();
   const View = appViews[app.id];
@@ -2037,10 +2043,10 @@ function AppView({ app, isOpen, onClose, onExitComplete }) {
     ? { type:'tween', duration:0.32, ease:[0.4,0,0.2,1] }
     : enteredViaCrossNav
       ? { type:'tween', duration:0.42, ease:[0.22,1,0.36,1] }
-      : { type:'tween', duration:0.28, ease:[0.32,0.72,0,1] };
-  const layoutTween = { duration:0.30, ease:[0.32,0.72,0,1] };
-  const contentCloseMotion = { duration:0.30, ease:[0.32,0.72,0,1] };
-  const tileCloseMotion = { duration:1.30, ease:[0.32,0.72,0,1] };
+      : { type:'tween', duration:CONTENT_CLOSE_S, ease:EASE_OUT };
+  const layoutTween = { duration:LAYOUT_CLOSE_S, ease:EASE_OUT };
+  const contentCloseMotion = { duration:CONTENT_CLOSE_S, ease:EASE_OUT };
+  const tileCloseMotion = { duration:TILE_CLOSE_S, ease:EASE_OUT };
 
   const controls = useAnimationControls();
   const exitDoneRef = React.useRef(false);
@@ -2051,8 +2057,6 @@ function AppView({ app, isOpen, onClose, onExitComplete }) {
     onExitComplete();
   }, [onExitComplete]);
 
-  // Cross-nav and app-to-app replace still use controls; home-screen close morphs
-  // via layoutId while inner content fades out in parallel.
   useEffect(() => {
     if (isOpen) {
       exitDoneRef.current = false;
@@ -2064,7 +2068,7 @@ function AppView({ app, isOpen, onClose, onExitComplete }) {
       return;
     }
     if (morphClose) {
-      const fallback = setTimeout(finishExit, 1400);
+      const fallback = setTimeout(finishExit, TILE_CLOSE_S * 1000 + 100);
       return () => clearTimeout(fallback);
     }
     let cancelled = false;
