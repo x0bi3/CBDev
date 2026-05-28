@@ -2038,19 +2038,15 @@ function AppView({ app, onClose }) {
       dragConstraints={{ top:0, bottom:0 }} dragElastic={{ top:0, bottom:0.6 }}
       onDragEnd={(_, info) => { if (info.offset.y > 140 || info.velocity.y > 600) onClose(); }}
       transition={containerTransition}>
-      {/* Dark backdrop fades in AFTER the morph spring has mostly settled (~280ms in)
-          so it doesn't slam over the gradient mid-flight. The section's bg-neutral-950
-          finishes covering the tile gradient as it slides up. */}
-      {!skipMorph && (
-        <motion.div initial={{ opacity:0 }} animate={{ opacity:1 }} exit={{ opacity:0 }}
-          transition={{ delay:0.30, duration:0.18 }}
-          className="pointer-events-none absolute inset-0 bg-neutral-950" />
-      )}
+      {/* Header and section render at full opacity from t=0 so the page content is
+          visible throughout the morph (iOS-style: content scales with the icon as it
+          expands). The section's bg-neutral-950 immediately covers the tile gradient
+          inside the morphing container so we don't need a separate dark overlay. */}
       <motion.header
-        initial={{ opacity:0 }}
+        initial={enteredViaCrossNav ? { opacity:0 } : false}
         animate={{ opacity:1 }}
         exit={{ opacity:0 }}
-        transition={enteredViaCrossNav ? { delay:0.05, duration:0.20 } : { delay:0.32, duration:0.20 }}
+        transition={enteredViaCrossNav ? { delay:0.05, duration:0.20 } : { duration:0.18 }}
         className="absolute inset-x-0 top-0 z-20"
         style={{ paddingTop:'max(env(safe-area-inset-top),12px)' }}>
         <div className="flex items-center justify-between gap-3 px-4 pt-12 pb-3">
@@ -2077,10 +2073,10 @@ function AppView({ app, onClose }) {
         </div>
       </motion.header>
       <motion.section
-        initial={{ opacity:0 }}
+        initial={enteredViaCrossNav ? { opacity:0 } : false}
         animate={{ opacity:1 }}
         exit={{ opacity:0 }}
-        transition={enteredViaCrossNav ? { delay:0.08, duration:0.24, ease:[0.22,1,0.36,1] } : { delay:0.34, duration:0.22, ease:[0.22,1,0.36,1] }}
+        transition={enteredViaCrossNav ? { delay:0.08, duration:0.24, ease:[0.22,1,0.36,1] } : { duration:0.18, ease:[0.22,1,0.36,1] }}
         className="no-scrollbar absolute inset-0 overflow-y-auto bg-neutral-950 text-white"
         data-app-section
         style={{ paddingTop:'calc(max(env(safe-area-inset-top),12px) + 84px)',
@@ -2546,7 +2542,10 @@ function Device() {
           <Dock />
           <HomeIndicator onClick={openAppId ? closeApp : undefined} />
         </div>
-        <AnimatePresence mode="popLayout">
+        {/* mode="wait" forces a closing AppView to fully complete its exit morph before
+            a new one mounts. Prevents the layoutId pile-up that left the previous app
+            stranded at fullscreen (the "stuck gray screen" bug) when cycling fast. */}
+        <AnimatePresence mode="wait">
           {openedApp && <AppView key={openedApp.id} app={openedApp} onClose={closeApp} />}
         </AnimatePresence>
         <AuthSheet />
