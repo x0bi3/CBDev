@@ -2145,7 +2145,7 @@ function AppView({ app, isOpen, onClose, onExitComplete }) {
         className="absolute inset-x-0 top-0 z-20"
         style={{ paddingTop:'max(env(safe-area-inset-top),12px)' }}>
         <div className="flex items-center justify-between gap-3 px-4 pt-12 pb-3">
-          <div className="flex min-w-0 items-center gap-2">
+          <div className="flex min-w-0 items-center gap-2" aria-label={app.label}>
             {fromApp && (
               <button onClick={() => openApp(fromApp.id)} aria-label={'Back to ' + fromApp.label}
                 className="flex shrink-0 items-center gap-1 rounded-full bg-white/15 px-2.5 py-1 text-[12px] font-medium text-white backdrop-blur-md transition hover:bg-white/25 active:scale-95">
@@ -2155,8 +2155,7 @@ function AppView({ app, isOpen, onClose, onExitComplete }) {
                 <span className="whitespace-nowrap pr-0.5">{fromApp.label}</span>
               </button>
             )}
-            <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl text-[20px]" style={{ background:app.tile }}>{app.glyph}</div>
-            <h1 className="truncate text-[17px] font-semibold text-white">{app.label}</h1>
+            <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl text-[20px]" style={{ background:app.tile }} aria-hidden>{app.glyph}</div>
           </div>
           <button type="button" onClick={onClose} aria-label="Close"
             className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-white/15 text-white backdrop-blur-md transition hover:bg-white/25 active:scale-90">
@@ -2627,11 +2626,11 @@ function Device() {
       <Wallpaper theme={theme} dimmed={!!openAppId} />
       <LayoutGroup>
         <div className="pointer-events-none absolute inset-x-0 top-0 z-50">
-          {/* Top scrim: black at the status bar, fades to fully transparent below. */}
+          {/* Top scrim: near-solid black at the status bar, fades to 0 at the bottom. */}
           <div aria-hidden="true"
-            className="pointer-events-none absolute inset-x-0 top-0 h-[140px]"
+            className="pointer-events-none absolute inset-x-0 top-0 h-[128px]"
             style={{
-              background:'linear-gradient(to bottom, rgba(0,0,0,0.62) 0%, rgba(0,0,0,0.38) 38%, rgba(0,0,0,0.12) 68%, rgba(0,0,0,0) 100%)',
+              background:'linear-gradient(to bottom, rgba(0,0,0,0.82) 0%, rgba(0,0,0,0.72) 28%, rgba(0,0,0,0.38) 58%, rgba(0,0,0,0.08) 82%, rgba(0,0,0,0) 100%)',
             }}
           />
           <div className="relative pointer-events-auto" style={{ paddingTop:'max(env(safe-area-inset-top),12px)' }}>
