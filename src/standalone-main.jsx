@@ -2077,7 +2077,9 @@ function AppView({ app, isOpen, onClose, onExitComplete }) {
       return;
     }
     if (morphClose) {
-      const fallback = setTimeout(finishExit, 200);
+      // Let content/tile fades + layout morph finish; 200ms was unmounting before they ran.
+      const fallbackMs = TILE_CLOSE_S * 1000 + 150;
+      const fallback = setTimeout(finishExit, fallbackMs);
       return () => clearTimeout(fallback);
     }
     let cancelled = false;
@@ -2114,7 +2116,10 @@ function AppView({ app, isOpen, onClose, onExitComplete }) {
       }}
       initial={enteredViaCrossNav ? { x: '100%', opacity: 0.6, scale: 1 } : false}
       animate={useControlsAnimate ? controls : undefined}
-      transition={{ layout: layoutTween, default: contentCloseMotion }}>
+      transition={{ layout: layoutTween, default: contentCloseMotion }}
+      onLayoutAnimationComplete={() => {
+        if (!isOpen && morphClose) finishExit();
+      }}>
       {morphClose && (
         <motion.div
           aria-hidden
