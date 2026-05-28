@@ -81,6 +81,9 @@ function DeviceProvider({ children }) {
   const [homePage, setHomePage] = useState(0);
   const [openAppId, setOpenAppId] = useState(null);
   const [prevAppId, setPrevAppId] = useState(null);
+  const [shellAppId, setShellAppId] = useState(null);
+  const openAppIdRef = useRef(null);
+  openAppIdRef.current = openAppId;
   const [ccOpen, setCcOpen] = useState(false);
   const profileBtnRef = useRef(null);
   const themeBtnRef = useRef(null);
@@ -155,6 +158,19 @@ function DeviceProvider({ children }) {
   }, []);
 
   useEffect(() => {
+    if (openAppId && !shellAppId) setShellAppId(openAppId);
+  }, [openAppId, shellAppId]);
+
+  const handleShellExitComplete = useCallback(() => {
+    setShellAppId(prev => {
+      const next = openAppIdRef.current;
+      if (!next) return null;
+      if (next !== prev) return next;
+      return null;
+    });
+  }, []);
+
+  useEffect(() => {
     const onKey = e => {
       if (e.key === 'Escape') {
         if (authOpen) { setAuthOpen(false); return; }
@@ -201,7 +217,7 @@ function DeviceProvider({ children }) {
     themeId, setTheme:setThemeId,
     eyeId, setEye:setEyeId,
     homePage, setHomePage,
-    openAppId, prevAppId, openApp, closeApp,
+    openAppId, prevAppId, shellAppId, openApp, closeApp, handleShellExitComplete,
     ccOpen, toggleCc, closeCc,
     appOrder, setAppOrder, resetAppOrder,
     auth, setAuth, authOpen, openAuth, closeAuth,
@@ -213,9 +229,9 @@ function DeviceProvider({ children }) {
     miniPlayerOpen, openMiniPlayer, closeMiniPlayer,
     // gesture lock
     dragLocked, lockDrag, unlockDrag,
-  }), [themeId, eyeId, homePage, openAppId, prevAppId, ccOpen, appOrder, auth, authOpen,
+  }), [themeId, eyeId, homePage, openAppId, prevAppId, shellAppId, ccOpen, appOrder, auth, authOpen,
       musicCurrent, musicPlaying, musicVolume, musicStatus, miniPlayerOpen, dragLocked,
-      openApp, closeApp, setAppOrder, resetAppOrder, setAuth, openAuth, closeAuth,
+      openApp, closeApp, handleShellExitComplete, setAppOrder, resetAppOrder, setAuth, openAuth, closeAuth,
       toggleCc, closeCc, playStation, togglePlay, setMusicVolume, openMiniPlayer, closeMiniPlayer,
       lockDrag, unlockDrag]);
   return <DeviceCtx.Provider value={value}>{children}</DeviceCtx.Provider>;
@@ -1809,6 +1825,8 @@ function Wallpaper({ theme, dimmed }) {
 
 /* ========================= ICON / GRID / DOCK ========================= */
 function AppIcon({ app, onTap, showLabel = true, size = 62 }) {
+  const { shellAppId } = useDevice();
+  const hideTile = shellAppId === app.id;
   const handle = () => {
     if (app.href) window.open(app.href,'_blank','noopener,noreferrer');
     else onTap(app);
@@ -1817,7 +1835,7 @@ function AppIcon({ app, onTap, showLabel = true, size = 62 }) {
     <button onClick={handle} aria-label={'Open ' + app.label}
       className="group flex flex-col items-center gap-1.5 outline-none focus-visible:ring-2 focus-visible:ring-white/70 rounded-2xl">
       <motion.div layoutId={'app-tile-' + app.id} className="icon-shadow relative overflow-hidden"
-        style={{ width:size, height:size, borderRadius:size*0.28, background:app.tile, opacity:1 }}
+        style={{ width:size, height:size, borderRadius:size*0.28, background:app.tile, opacity: hideTile ? 0 : 1 }}
         whileTap={{ scale:0.88 }} transition={{ type:'spring', stiffness:400, damping:28 }}>
         <span className="pointer-events-none absolute inset-0"
           style={{ background:'linear-gradient(180deg,rgba(255,255,255,0.28) 0%,rgba(255,255,255,0) 35%,rgba(0,0,0,0.18) 100%)' }} />
@@ -2021,7 +2039,8 @@ function AppView({ app, isOpen, onClose, onExitComplete }) {
       ? { type:'tween', duration:0.42, ease:[0.22,1,0.36,1] }
       : { type:'tween', duration:0.28, ease:[0.32,0.72,0,1] };
   const layoutTween = { duration:0.30, ease:[0.32,0.72,0,1] };
-  const closeMotion = { duration:0.30, ease:[0.32,0.72,0,1] };
+  const contentCloseMotion = { duration:0.30, ease:[0.32,0.72,0,1] };
+  const tileCloseMotion = { duration:1.30, ease:[0.32,0.72,0,1] };
 
   const controls = useAnimationControls();
   const exitDoneRef = React.useRef(false);
@@ -2045,7 +2064,7 @@ function AppView({ app, isOpen, onClose, onExitComplete }) {
       return;
     }
     if (morphClose) {
-      const fallback = setTimeout(finishExit, 400);
+      const fallback = setTimeout(finishExit, 1400);
       return () => clearTimeout(fallback);
     }
     let cancelled = false;
@@ -2078,23 +2097,23 @@ function AppView({ app, isOpen, onClose, onExitComplete }) {
       }}
       initial={enteredViaCrossNav ? { x: '100%', opacity: 0.6, scale: 1 } : false}
       animate={useControlsAnimate ? controls : { borderRadius: isOpen ? 0 : 18 }}
-      transition={{ layout: layoutTween, borderRadius: closeMotion, default: closeMotion }}
-      onLayoutAnimationComplete={() => {
-        if (!isOpen && morphClose) finishExit();
-      }}>
+      transition={{ layout: layoutTween, borderRadius: contentCloseMotion, default: contentCloseMotion }}>
       {morphClose && (
         <motion.div
           aria-hidden
           className="pointer-events-none absolute inset-0"
           style={{ background:app.tile }}
           animate={{ opacity: isOpen ? 1 : 0 }}
-          transition={closeMotion}
+          transition={tileCloseMotion}
+          onAnimationComplete={() => {
+            if (!isOpen) finishExit();
+          }}
         />
       )}
       <motion.div
         className="absolute inset-0 flex flex-col bg-[#0a0a0a]"
         animate={{ opacity: isOpen ? 1 : 0 }}
-        transition={morphClose ? closeMotion : { duration: isOpen ? 0.24 : 0.18, ease:[0.32,0.72,0,1] }}>
+        transition={morphClose ? contentCloseMotion : { duration: isOpen ? 0.24 : 0.18, ease:[0.32,0.72,0,1] }}>
       <motion.div
         className="absolute inset-0"
         style={{ y, scale, opacity }}
@@ -2580,29 +2599,11 @@ function MiniPlayer() {
 
 /* ========================= DEVICE ROOT ========================= */
 function Device() {
-  const { themeId, openAppId, closeApp, audioRef } = useDevice();
+  const { themeId, openAppId, shellAppId, closeApp, handleShellExitComplete, audioRef } = useDevice();
   const theme = themes[themeId];
-  const [shellAppId, setShellAppId] = useState(null);
-
-  // Open: mount the shell when home requests an app and nothing is showing yet.
-  useEffect(() => {
-    if (openAppId && !shellAppId) setShellAppId(openAppId);
-  }, [openAppId, shellAppId]);
 
   const shellApp = shellAppId ? getApp(shellAppId) : null;
   const isShellOpen = !!openAppId && openAppId === shellAppId;
-
-  const openAppIdRef = useRef(openAppId);
-  openAppIdRef.current = openAppId;
-
-  const handleShellExitComplete = useCallback(() => {
-    setShellAppId(prev => {
-      const next = openAppIdRef.current;
-      if (!next) return null;
-      if (next !== prev) return next;
-      return null;
-    });
-  }, []);
 
   return (
     <div className="relative h-full w-full overflow-hidden font-sf">
