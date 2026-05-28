@@ -80,7 +80,7 @@ const useDevice = () => useContext(DeviceCtx);
 // console that the user is actually running the latest build. Format: v<major>.<minor>.
 // Debug logging is on by default during this debug window so the user does not need
 // to flip a flag. Disable with localStorage.setItem('cb-debug','0').
-const LOG_VERSION = 'v2.3';
+const LOG_VERSION = 'v2.4';
 const CB_DEBUG = (() => {
   try {
     if (typeof window === 'undefined') return false;
@@ -2063,30 +2063,30 @@ function AppView({ app, onClose, onPresenceChange }) {
 
   const containerLayoutId = skipMorph ? undefined : ('app-tile-' + app.id);
 
+  // Exit animation must be defined from the first render while the view is open.
+  // AnimatePresence snapshots exit when the child is removed; if it was undefined
+  // on the prior open frame, no exit runs and the view strands at opacity 1.
+  const exitAnimRef = React.useRef(null);
+  if (exitAnimRef.current === null) {
+    exitAnimRef.current = enteredViaCrossNav
+      ? { y: 80, opacity: 0, scale: 0.96, transition: { type:'tween', duration:0.42, ease:[0.22,1,0.36,1] } }
+      : { opacity: 0, scale: 0.94, transition: { type:'tween', duration:0.28, ease:[0.32,0.72,0,1] } };
+  }
+  if (exitModeRef.current === 'replaced') {
+    exitAnimRef.current = { x: '-22%', opacity: 0, transition: { type:'tween', duration:0.32, ease:[0.4,0,0.2,1] } };
+  }
+
   const usesLayoutMorph = !!containerLayoutId;
   const containerInitial = enteredViaCrossNav ? { x: '100%', opacity: 0.6, scale: 1 } : false;
-  // When layoutId morphs the tile, do not also animate opacity/scale on this element —
-  // the icon side has no opacity in its snapshot, so the dual source of truth made
-  // framer-motion write style.opacity: undefined during projection.
-  const containerAnimate = usesLayoutMorph ? undefined : { x: 0, opacity: 1, scale: 1 };
-  const containerExit = isBeingReplaced
-    ? { x: '-22%', opacity: 0 }
-    : isExiting && enteredViaCrossNav
-      ? { y: 80, opacity: 0, scale: 0.96 }
-      : isExiting
-        ? { opacity: 0, scale: 0.94 }
-        : undefined;
-  const containerTransition = isBeingReplaced
-    ? { type:'tween', duration:0.32, ease:[0.4,0,0.2,1] }
-    : isExiting && enteredViaCrossNav
+  // Never pass animate while exiting — animate={{ opacity: 1 }} was overriding exit.
+  const containerAnimate = isExiting ? undefined : (usesLayoutMorph ? undefined : { x: 0, opacity: 1, scale: 1 });
+  const containerTransition = usesLayoutMorph
+    ? { type:'tween', duration:0.30, ease:[0.32,0.72,0,1] }
+    : enteredViaCrossNav
       ? { type:'tween', duration:0.42, ease:[0.22,1,0.36,1] }
-      : isExiting
-        ? { type:'tween', duration:0.28, ease:[0.32,0.72,0,1] }
-        : enteredViaCrossNav
-          ? { type:'tween', duration:0.42, ease:[0.22,1,0.36,1] }
-          : { type:'tween', duration:0.30, ease:[0.32,0.72,0,1] };
+      : { type:'tween', duration:0.30, ease:[0.32,0.72,0,1] };
 
-  log('AppView RENDER', { id: app.id, layoutId: containerLayoutId, hasExplicitExit: containerExit !== undefined, exitMode: exitModeRef.current });
+  log('AppView RENDER', { id: app.id, layoutId: containerLayoutId, exitMode: exitModeRef.current, isExiting });
   // Two-layer structure (deliberate): the OUTER motion.div owns the layoutId
   // morph and the open/close/cross-nav animation (initial/animate/exit). The
   // INNER motion.div owns drag-to-dismiss feedback via motion values for y,
@@ -2106,7 +2106,7 @@ function AppView({ app, onClose, onPresenceChange }) {
       style={{ background: skipMorph ? '#0a0a0a' : app.tile, borderRadius: 0 }}
       initial={containerInitial}
       {...(containerAnimate !== undefined ? { animate: containerAnimate } : {})}
-      exit={containerExit}
+      exit={exitAnimRef.current}
       onAnimationStart={(def) => log('AppView animStart', { id: app.id, def })}
       onAnimationComplete={(def) => log('AppView animComplete', { id: app.id, def })}
       onLayoutAnimationStart={() => log('AppView layoutStart', { id: app.id })}
