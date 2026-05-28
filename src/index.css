@@ -63,7 +63,7 @@ body,
 
 /* App icon depth */
 .icon-shadow {
-  filter: drop-shadow(0 6px 12px rgba(0, 0, 0, 0.35));
+  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.35);
 }
 
 /* Hide scrollbars inside apps but keep scrolling */

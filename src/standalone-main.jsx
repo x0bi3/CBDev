@@ -1802,6 +1802,7 @@ function Wallpaper({ theme, dimmed }) {
           <motion.div
             className="absolute inset-0 pointer-events-none"
             style={{ background:css, opacity:0.55, mixBlendMode:'overlay' }}
+            initial={{ filter:'hue-rotate(0deg)' }}
             animate={{ filter:['hue-rotate(0deg)','hue-rotate(20deg)','hue-rotate(-15deg)','hue-rotate(0deg)'] }}
             transition={{ duration:40, repeat:Infinity, ease:'easeInOut' }}
           />
@@ -1843,7 +1844,7 @@ function AppIcon({ app, onTap, showLabel = true, size = APP_TILE_SIZE }) {
       <div className="icon-shadow relative overflow-hidden"
         style={{ width:size, height:size, borderRadius:APP_TILE_RADIUS_PX }}>
         <motion.div layoutId={'app-tile-' + app.id} className="absolute inset-0"
-          style={{ background:app.tile, borderRadius:0, opacity: hideTile ? 0 : 1 }}
+          style={{ background:app.tile, borderRadius:0, filter:'none', opacity: hideTile ? 0 : 1 }}
           whileTap={{ scale:0.88 }} transition={{ type:'spring', stiffness:400, damping:28 }}>
           <span className="pointer-events-none absolute inset-0"
             style={{ background:'linear-gradient(180deg,rgba(255,255,255,0.28) 0%,rgba(255,255,255,0) 35%,rgba(0,0,0,0.18) 100%)' }} />
@@ -2105,6 +2106,7 @@ function AppView({ app, isOpen, onClose, onExitComplete }) {
       className="fixed inset-0 z-40 overflow-hidden"
       style={{
         borderRadius:0,
+        filter:'none',
         backfaceVisibility:'hidden',
         WebkitBackfaceVisibility:'hidden',
         ...(useControlsAnimate ? { background:'#0a0a0a' } : {}),
