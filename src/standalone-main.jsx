@@ -1839,14 +1839,17 @@ function AppIcon({ app, onTap, showLabel = true, size = APP_TILE_SIZE }) {
   return (
     <button onClick={handle} aria-label={'Open ' + app.label}
       className="group flex flex-col items-center gap-1.5 outline-none focus-visible:ring-2 focus-visible:ring-white/70 rounded-2xl">
-      <motion.div layoutId={'app-tile-' + app.id} className="icon-shadow relative overflow-hidden"
-        style={{ width:size, height:size, borderRadius:0, opacity: hideTile ? 0 : 1 }}
-        whileTap={{ scale:0.88 }} transition={{ type:'spring', stiffness:400, damping:28 }}>
-        <div className="absolute inset-0" style={{ background:app.tile, borderRadius:APP_TILE_RADIUS_PX }} />
-        <span className="pointer-events-none absolute inset-0"
-          style={{ background:'linear-gradient(180deg,rgba(255,255,255,0.28) 0%,rgba(255,255,255,0) 35%,rgba(0,0,0,0.18) 100%)' }} />
-        <div className="absolute inset-0 grid place-items-center text-[28px] leading-none text-white">{app.glyph}</div>
-      </motion.div>
+      {/* Rounded clip + shadow stay off the layoutId node (square morph target). */}
+      <div className="icon-shadow relative overflow-hidden"
+        style={{ width:size, height:size, borderRadius:APP_TILE_RADIUS_PX }}>
+        <motion.div layoutId={'app-tile-' + app.id} className="absolute inset-0"
+          style={{ background:app.tile, borderRadius:0, opacity: hideTile ? 0 : 1 }}
+          whileTap={{ scale:0.88 }} transition={{ type:'spring', stiffness:400, damping:28 }}>
+          <span className="pointer-events-none absolute inset-0"
+            style={{ background:'linear-gradient(180deg,rgba(255,255,255,0.28) 0%,rgba(255,255,255,0) 35%,rgba(0,0,0,0.18) 100%)' }} />
+          <div className="absolute inset-0 grid place-items-center text-[28px] leading-none text-white">{app.glyph}</div>
+        </motion.div>
+      </div>
       {showLabel && <span
         className="text-[13px] font-semibold leading-tight text-white drop-shadow-[0_1px_3px_rgba(0,0,0,0.7)]">{app.label}</span>}
     </button>
