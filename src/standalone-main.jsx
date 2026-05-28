@@ -1846,7 +1846,7 @@ function AppIcon({ app, onTap, showLabel = true, size = 62 }) {
           className="absolute inset-0 grid place-items-center text-[28px] leading-none text-white">{app.glyph}</motion.div>
       </motion.div>
       {showLabel && <motion.span layoutId={'app-label-' + app.id}
-        className="text-[11px] font-medium leading-tight text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.6)]">{app.label}</motion.span>}
+        className="text-[13px] font-semibold leading-tight text-white drop-shadow-[0_1px_3px_rgba(0,0,0,0.7)]">{app.label}</motion.span>}
     </button>
   );
 }
@@ -2596,7 +2596,12 @@ function Device() {
       <Wallpaper theme={theme} dimmed={!!openAppId} />
       <LayoutGroup>
         <div className="pointer-events-none absolute inset-x-0 top-0 z-50">
-          <div className="pointer-events-auto" style={{ paddingTop:'max(env(safe-area-inset-top),12px)' }}>
+          {/* Legibility scrim: fades dark-translucent → transparent so the white
+              status-bar text and brand wordmark stay readable on bright/blueish
+              wallpapers without making the area look like a solid bar. */}
+          <div aria-hidden="true"
+            className="pointer-events-none absolute inset-x-0 top-0 h-[110px] bg-gradient-to-b from-black/50 via-black/20 to-transparent" />
+          <div className="relative pointer-events-auto" style={{ paddingTop:'max(env(safe-area-inset-top),12px)' }}>
             <StatusBar />
           </div>
         </div>
