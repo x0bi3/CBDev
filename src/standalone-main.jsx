@@ -2000,7 +2000,10 @@ function AppView({ app, isOpen, onClose, onExitComplete }) {
   const tileLayoutIdRef = React.useRef(
     enteredViaCrossNav ? undefined : ('app-tile-' + app.id)
   );
+  const hasTileMorph = !!tileLayoutIdRef.current;
   const isReplaced = !isOpen && !!openAppId;
+  const morphClose = hasTileMorph && !enteredViaCrossNav && !isReplaced;
+
   const closeTarget = enteredViaCrossNav
     ? { y: 80, opacity: 0, scale: 0.96 }
     : { opacity: 0, scale: 0.94 };
@@ -2010,42 +2013,41 @@ function AppView({ app, isOpen, onClose, onExitComplete }) {
     : enteredViaCrossNav
       ? { type:'tween', duration:0.42, ease:[0.22,1,0.36,1] }
       : { type:'tween', duration:0.28, ease:[0.32,0.72,0,1] };
+  const layoutTween = { duration:0.30, ease:[0.32,0.72,0,1] };
 
   const controls = useAnimationControls();
   const exitDoneRef = React.useRef(false);
 
-  // Drive close explicitly. After a layoutId open, animate was omitted so flipping
-  // isOpen via the X button never started a close tween — pointer-events went
-  // none immediately and onAnimationComplete never fired (Escape often worked
-  // because it was pressed after the layout morph had fully settled).
+  const finishExit = useCallback(() => {
+    if (exitDoneRef.current) return;
+    exitDoneRef.current = true;
+    onExitComplete();
+  }, [onExitComplete]);
+
+  // Cross-nav and app-to-app replace still use controls; home-screen close morphs
+  // via layoutId while inner content fades out in parallel.
   useEffect(() => {
     if (isOpen) {
       exitDoneRef.current = false;
       if (enteredViaCrossNav) {
         controls.start({ x: 0, opacity: 1, scale: 1, transition: { type:'tween', duration:0.42, ease:[0.22,1,0.36,1] } });
-      } else if (!tileLayoutIdRef.current) {
-        controls.start({ x: 0, opacity: 1, scale: 1, transition: { type:'tween', duration:0.30, ease:[0.32,0.72,0,1] } });
-      } else {
-        controls.start({ opacity: 1, scale: 1 });
+      } else if (!hasTileMorph) {
+        controls.start({ x: 0, opacity: 1, scale: 1, transition: layoutTween });
       }
       return;
     }
-    const target = isReplaced ? replaceTarget : closeTarget;
+    if (morphClose) {
+      const fallback = setTimeout(finishExit, 400);
+      return () => clearTimeout(fallback);
+    }
     let cancelled = false;
+    const target = isReplaced ? replaceTarget : closeTarget;
     controls.start({ ...target, transition: closeTransition }).then(() => {
-      if (!cancelled && !exitDoneRef.current) {
-        exitDoneRef.current = true;
-        onExitComplete();
-      }
+      if (!cancelled) finishExit();
     });
-    const fallback = setTimeout(() => {
-      if (!cancelled && !exitDoneRef.current) {
-        exitDoneRef.current = true;
-        onExitComplete();
-      }
-    }, 400);
+    const fallback = setTimeout(() => { if (!cancelled) finishExit(); }, 400);
     return () => { cancelled = true; clearTimeout(fallback); };
-  }, [isOpen, isReplaced, enteredViaCrossNav, controls, onExitComplete]);
+  }, [isOpen, morphClose, isReplaced, enteredViaCrossNav, hasTileMorph, controls, finishExit, closeTransition]);
 
   const y = useMotionValue(0);
   const scale = useTransform(y, [0,300], [1,0.85]);
@@ -2056,18 +2058,28 @@ function AppView({ app, isOpen, onClose, onExitComplete }) {
     return () => { document.body.style.overflow = ''; };
   }, []);
 
-  const layoutId = isOpen && tileLayoutIdRef.current ? tileLayoutIdRef.current : undefined;
+  const layoutId = morphClose ? tileLayoutIdRef.current : undefined;
+  const useControlsAnimate = enteredViaCrossNav || isReplaced;
 
   return (
     <motion.div layoutId={layoutId}
       className="fixed inset-0 z-40 overflow-hidden bg-neutral-950"
       style={{
-        background: (enteredViaCrossNav || !isOpen) ? '#0a0a0a' : app.tile,
-        borderRadius: 0,
+        ...(useControlsAnimate ? { background:'#0a0a0a', borderRadius:0 } : {}),
         pointerEvents: isOpen ? 'auto' : 'none',
       }}
       initial={enteredViaCrossNav ? { x: '100%', opacity: 0.6, scale: 1 } : false}
-      animate={controls}>
+      animate={useControlsAnimate ? controls : (isOpen
+        ? { background:'#0a0a0a', borderRadius:0 }
+        : { background:app.tile, borderRadius:18 })}
+      transition={{ layout: layoutTween, default: { duration:0.22, ease:[0.32,0.72,0,1] } }}
+      onLayoutAnimationComplete={() => {
+        if (!isOpen && morphClose) finishExit();
+      }}>
+      <motion.div
+        className="absolute inset-0"
+        animate={{ opacity: isOpen ? 1 : 0 }}
+        transition={{ duration: isOpen ? 0.24 : 0.18, ease:[0.32,0.72,0,1] }}>
       <motion.div
         className="absolute inset-0"
         style={{ y, scale, opacity }}
@@ -2113,6 +2125,7 @@ function AppView({ app, isOpen, onClose, onExitComplete }) {
                  paddingBottom:'calc(max(env(safe-area-inset-bottom),12px) + 40px)' }}>
         {View ? <View /> : <div className="px-6"><p className="text-white/70">No view for {app.label}</p></div>}
       </motion.section>
+      </motion.div>
       </motion.div>
     </motion.div>
   );
@@ -2578,7 +2591,7 @@ function Device() {
 
   return (
     <div className="relative h-full w-full overflow-hidden font-sf">
-      <Wallpaper theme={theme} dimmed={!!shellAppId} />
+      <Wallpaper theme={theme} dimmed={!!openAppId} />
       <LayoutGroup>
         <div className="pointer-events-none absolute inset-x-0 top-0 z-50">
           {/* Legibility scrim: fades dark-translucent → transparent so the white
