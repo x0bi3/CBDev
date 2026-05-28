@@ -2071,9 +2071,9 @@ function AppView({ app, isOpen, onClose, onExitComplete }) {
 
   return (
     <motion.div layoutId={layoutId}
-      className="fixed inset-0 z-40 overflow-hidden bg-neutral-950"
+      className="fixed inset-0 z-40 overflow-hidden"
       style={{
-        ...(morphClose ? { background:app.tile } : useControlsAnimate ? { background:'#0a0a0a', borderRadius:0 } : {}),
+        ...(useControlsAnimate ? { background:'#0a0a0a', borderRadius:0 } : {}),
         pointerEvents: isOpen ? 'auto' : 'none',
       }}
       initial={enteredViaCrossNav ? { x: '100%', opacity: 0.6, scale: 1 } : false}
@@ -2085,13 +2085,14 @@ function AppView({ app, isOpen, onClose, onExitComplete }) {
       {morphClose && (
         <motion.div
           aria-hidden
-          className="pointer-events-none absolute inset-0 z-[1] bg-[#0a0a0a]"
+          className="pointer-events-none absolute inset-0"
+          style={{ background:app.tile }}
           animate={{ opacity: isOpen ? 1 : 0 }}
           transition={closeMotion}
         />
       )}
       <motion.div
-        className="absolute inset-0 z-[2]"
+        className="absolute inset-0 flex flex-col bg-[#0a0a0a]"
         animate={{ opacity: isOpen ? 1 : 0 }}
         transition={morphClose ? closeMotion : { duration: isOpen ? 0.24 : 0.18, ease:[0.32,0.72,0,1] }}>
       <motion.div
@@ -2103,7 +2104,7 @@ function AppView({ app, isOpen, onClose, onExitComplete }) {
         onDragEnd={(_, info) => { if (info.offset.y > 140 || info.velocity.y > 600) onClose(); }}>
       <motion.header
         initial={enteredViaCrossNav ? { opacity:0 } : false}
-        animate={{ opacity:1 }}
+        animate={morphClose ? undefined : { opacity:1 }}
         transition={enteredViaCrossNav ? { delay:0.05, duration:0.20 } : { duration:0.18 }}
         className="absolute inset-x-0 top-0 z-20"
         style={{ paddingTop:'max(env(safe-area-inset-top),12px)' }}>
@@ -2131,7 +2132,7 @@ function AppView({ app, isOpen, onClose, onExitComplete }) {
       </motion.header>
       <motion.section
         initial={enteredViaCrossNav ? { opacity:0 } : false}
-        animate={{ opacity:1 }}
+        animate={morphClose ? undefined : { opacity:1 }}
         transition={enteredViaCrossNav ? { delay:0.08, duration:0.24, ease:[0.22,1,0.36,1] } : { duration:0.18, ease:[0.22,1,0.36,1] }}
         className="no-scrollbar absolute inset-0 overflow-y-auto bg-neutral-950 text-white"
         data-app-section
