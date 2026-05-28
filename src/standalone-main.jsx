@@ -6,7 +6,7 @@ import '@fontsource/inter/700.css';
 
 import React, { createContext, useContext, useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
-import { motion, AnimatePresence, LayoutGroup, useMotionValue, useTransform, Reorder } from 'framer-motion';
+import { motion, AnimatePresence, LayoutGroup, useMotionValue, useTransform, Reorder, usePresence } from 'framer-motion';
 
 /* ========================= THEMES ========================= */
 const themes = {
@@ -80,7 +80,7 @@ const useDevice = () => useContext(DeviceCtx);
 // console that the user is actually running the latest build. Format: v<major>.<minor>.
 // Debug logging is on by default during this debug window so the user does not need
 // to flip a flag. Disable with localStorage.setItem('cb-debug','0').
-const LOG_VERSION = 'v2.4';
+const LOG_VERSION = 'v2.5';
 const CB_DEBUG = (() => {
   try {
     if (typeof window === 'undefined') return false;
@@ -2014,6 +2014,7 @@ function Dock() {
 /* ========================= APP VIEW (morph or cross-app slide) ========================= */
 function AppView({ app, onClose, onPresenceChange }) {
   const { openAppId, prevAppId, openApp, dragLocked } = useDevice();
+  const [isPresent, safeToRemove] = usePresence();
   const View = appViews[app.id];
 
   // Capture entry mode ONCE at mount so close behavior is stable.
@@ -2061,7 +2062,13 @@ function AppView({ app, onClose, onPresenceChange }) {
     };
   }, [onPresenceChange]);
 
-  const containerLayoutId = skipMorph ? undefined : ('app-tile-' + app.id);
+  // Frozen for the whole mount — never clear layoutId mid-exit; toggling it was
+  // confusing AnimatePresence after the exit tween finished.
+  const tileLayoutIdRef = React.useRef(
+    enteredViaCrossNav ? undefined : ('app-tile-' + app.id)
+  );
+  const containerLayoutId = tileLayoutIdRef.current;
+  const usesLayoutMorph = !!containerLayoutId && !isExiting;
 
   // Exit animation must be defined from the first render while the view is open.
   // AnimatePresence snapshots exit when the child is removed; if it was undefined
@@ -2076,7 +2083,6 @@ function AppView({ app, onClose, onPresenceChange }) {
     exitAnimRef.current = { x: '-22%', opacity: 0, transition: { type:'tween', duration:0.32, ease:[0.4,0,0.2,1] } };
   }
 
-  const usesLayoutMorph = !!containerLayoutId;
   const containerInitial = enteredViaCrossNav ? { x: '100%', opacity: 0.6, scale: 1 } : false;
   // Never pass animate while exiting — animate={{ opacity: 1 }} was overriding exit.
   const containerAnimate = isExiting ? undefined : (usesLayoutMorph ? undefined : { x: 0, opacity: 1, scale: 1 });
@@ -2103,12 +2109,18 @@ function AppView({ app, onClose, onPresenceChange }) {
       // gradient — go straight to the dark app background to avoid a flash of pink/blue.
       // When we DO morph from the home icon we need the tile colour briefly so the
       // layoutId animation has matching colours between source and destination.
-      style={{ background: skipMorph ? '#0a0a0a' : app.tile, borderRadius: 0 }}
+      style={{ background: skipMorph ? '#0a0a0a' : app.tile, borderRadius: 0, pointerEvents: isExiting ? 'none' : 'auto' }}
       initial={containerInitial}
       {...(containerAnimate !== undefined ? { animate: containerAnimate } : {})}
       exit={exitAnimRef.current}
-      onAnimationStart={(def) => log('AppView animStart', { id: app.id, def })}
-      onAnimationComplete={(def) => log('AppView animComplete', { id: app.id, def })}
+      onAnimationStart={(def) => log('AppView animStart', { id: app.id, def, isPresent })}
+      onAnimationComplete={(def) => {
+        log('AppView animComplete', { id: app.id, def, isPresent });
+        if (!isPresent) {
+          log('AppView safeToRemove', { id: app.id });
+          safeToRemove();
+        }
+      }}
       onLayoutAnimationStart={() => log('AppView layoutStart', { id: app.id })}
       onLayoutAnimationComplete={() => log('AppView layoutComplete', { id: app.id })}
       transition={containerTransition}>
@@ -2126,7 +2138,6 @@ function AppView({ app, onClose, onPresenceChange }) {
       <motion.header
         initial={enteredViaCrossNav ? { opacity:0 } : false}
         animate={{ opacity:1 }}
-        exit={{ opacity:0 }}
         transition={enteredViaCrossNav ? { delay:0.05, duration:0.20 } : { duration:0.18 }}
         className="absolute inset-x-0 top-0 z-20"
         style={{ paddingTop:'max(env(safe-area-inset-top),12px)' }}>
@@ -2155,7 +2166,6 @@ function AppView({ app, onClose, onPresenceChange }) {
       <motion.section
         initial={enteredViaCrossNav ? { opacity:0 } : false}
         animate={{ opacity:1 }}
-        exit={{ opacity:0 }}
         transition={enteredViaCrossNav ? { delay:0.08, duration:0.24, ease:[0.22,1,0.36,1] } : { duration:0.18, ease:[0.22,1,0.36,1] }}
         className="no-scrollbar absolute inset-0 overflow-y-auto bg-neutral-950 text-white"
         data-app-section
