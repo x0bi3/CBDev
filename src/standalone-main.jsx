@@ -2631,13 +2631,11 @@ function Device() {
       <Wallpaper theme={theme} dimmed={!!openAppId} />
       <LayoutGroup>
         <div className="pointer-events-none absolute inset-x-0 top-0 z-50">
-          {/* Top scrim: near-solid black at the status bar, fades to 0 at the bottom. */}
+          {/* Legibility scrim: fades dark-translucent → transparent so the white
+              status-bar text and brand wordmark stay readable on bright/blueish
+              wallpapers without making the area look like a solid bar. */}
           <div aria-hidden="true"
-            className="pointer-events-none absolute inset-x-0 top-0 h-[128px]"
-            style={{
-              background:'linear-gradient(to bottom, rgba(0,0,0,0.82) 0%, rgba(0,0,0,0.72) 28%, rgba(0,0,0,0.38) 58%, rgba(0,0,0,0.08) 82%, rgba(0,0,0,0) 100%)',
-            }}
-          />
+            className="pointer-events-none absolute inset-x-0 top-0 h-[110px] bg-gradient-to-b from-black/50 via-black/20 to-transparent" />
           <div className="relative pointer-events-auto" style={{ paddingTop:'max(env(safe-area-inset-top),12px)' }}>
             <StatusBar />
           </div>
