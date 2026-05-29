@@ -1459,8 +1459,12 @@ function BlogApp() {
             <p className="text-[11px] uppercase tracking-wider text-white/50">{selected.date} · {selected.read}</p>
             <h1 className="mt-2 text-[28px] font-bold leading-tight">{selected.title}</h1>
             <p className="mt-3 text-[15px] italic leading-relaxed text-white/70">{selected.excerpt}</p>
-            <div className="mt-6 flex flex-col gap-4 text-[15px] leading-relaxed text-white/85">
-              {selected.body.map((para, i) => <p key={i}>{para}</p>)}
+            <div className="mt-6 flex flex-col gap-4 text-[15px] leading-relaxed text-white/85 blog-article-body">
+              {selected.body_html ? (
+                <div dangerouslySetInnerHTML={{ __html: selected.body_html }} />
+              ) : (
+                (selected.body || []).map((para, i) => <p key={i}>{para}</p>)
+              )}
             </div>
             <div className="mt-8 rounded-2xl border border-white/10 bg-white/[0.04] p-4 text-[13px] text-white/70">
               Enjoyed this? Follow along or get in touch via the Contact app.

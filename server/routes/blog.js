@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { query } from '../db.js';
+import { resolveBodyHtml } from '../lib/blogHtml.js';
 
 const router = Router();
 
@@ -19,13 +20,14 @@ function mapPost(row) {
     read: row.read_time,
     excerpt: row.excerpt,
     body: row.body || [],
+    body_html: resolveBodyHtml(row),
   };
 }
 
 router.get('/', async (_req, res) => {
   try {
     const { rows } = await query(
-      `SELECT slug, title, excerpt, body, read_time, published_at
+      `SELECT slug, title, excerpt, body, body_html, read_time, published_at
        FROM blog_posts WHERE status = 'published'
        ORDER BY published_at DESC NULLS LAST, id DESC`,
     );
@@ -39,7 +41,7 @@ router.get('/', async (_req, res) => {
 router.get('/:slug', async (req, res) => {
   try {
     const { rows } = await query(
-      `SELECT slug, title, excerpt, body, read_time, published_at
+      `SELECT slug, title, excerpt, body, body_html, read_time, published_at
        FROM blog_posts WHERE slug = $1 AND status = 'published'`,
       [req.params.slug],
     );

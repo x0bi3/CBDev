@@ -1,6 +1,7 @@
 import './admin.css';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
+import { BlogEditor } from './components/admin/BlogEditor.jsx';
 
 const TOKEN_KEY = 'cb-admin-token';
 
@@ -355,323 +356,11 @@ function ProductsSection() {
   );
 }
 
-const AGENT_STATE_STYLES = {
-  idle: 'bg-slate-700 text-slate-200',
-  queued: 'bg-amber-900/60 text-amber-200',
-  running: 'bg-emerald-900/60 text-emerald-200',
-  paused: 'bg-orange-900/60 text-orange-200',
-};
-
-function BlogAgentsSection() {
-  const [agents, setAgents] = useState([]);
-  const [expanded, setExpanded] = useState(null);
-  const [runs, setRuns] = useState([]);
-  const [logs, setLogs] = useState([]);
-  const [err, setErr] = useState('');
-  const [busy, setBusy] = useState(null);
-  const logListRef = useRef(null);
-  const lastLogIdRef = useRef(null);
-
-  const loadHistory = useCallback(async (agentId, runId) => {
-    if (!agentId) return;
-    const logsPath = runId
-      ? `/admin/blog-agents/${agentId}/logs?limit=80&run_id=${runId}`
-      : `/admin/blog-agents/${agentId}/logs?limit=80`;
-    const [r, l] = await Promise.all([
-      api('/admin/blog-agents/' + agentId + '/runs?limit=15'),
-      api(logsPath),
-    ]);
-    setRuns(r.runs);
-    const newestId = l.logs[l.logs.length - 1]?.id ?? null;
-    if (newestId === lastLogIdRef.current) return;
-    lastLogIdRef.current = newestId;
-    setLogs(l.logs);
-    requestAnimationFrame(() => {
-      const el = logListRef.current;
-      if (!el) return;
-      const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 64;
-      if (nearBottom) el.scrollTop = el.scrollHeight;
-    });
-  }, []);
-
-  const refreshAgents = useCallback(async () => {
-    const r = await api('/admin/blog-agents');
-    setAgents(r.agents);
-    return r.agents;
-  }, []);
-
-  const refresh = useCallback(async () => {
-    const list = await refreshAgents();
-    if (expanded) {
-      const agent = list.find((a) => a.id === expanded);
-      const runId = agent?.is_active ? agent.active_run_id : null;
-      await loadHistory(expanded, runId);
-    }
-  }, [expanded, loadHistory, refreshAgents]);
-
-  useEffect(() => {
-    refreshAgents().catch((ex) => setErr(ex.message));
-  }, [refreshAgents]);
-
-  const anyLive = agents.some((a) => a.is_active);
-
-  useEffect(() => {
-    if (!anyLive) return;
-    const t = setInterval(() => {
-      refresh().catch((ex) => setErr(ex.message));
-    }, 3000);
-    return () => clearInterval(t);
-  }, [anyLive, refresh]);
-
-  const openHistory = async (agent) => {
-    if (expanded === agent.id) {
-      setExpanded(null);
-      lastLogIdRef.current = null;
-      return;
-    }
-    setExpanded(agent.id);
-    lastLogIdRef.current = null;
-    try {
-      const runId = agent.is_active ? agent.active_run_id : null;
-      await loadHistory(agent.id, runId);
-    } catch (ex) {
-      setErr(ex.message);
-    }
-  };
-
-  const act = async (agentId, action) => {
-    setBusy(agentId + ':' + action);
-    setErr('');
-    try {
-      if (action === 'start') setExpanded(agentId);
-      await api('/admin/blog-agents/' + agentId + '/' + action, { method: 'POST' });
-      await refresh();
-    } catch (ex) {
-      setErr(ex.message);
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const saveSettings = async (agent) => {
-    setBusy('save:' + agent.id);
-    setErr('');
-    try {
-      await api('/admin/blog-agents/' + agent.id, {
-        method: 'PUT',
-        body: {
-          enabled: agent._enabled,
-          schedule_interval_minutes: agent._interval === '' ? null : Number(agent._interval),
-          config: JSON.parse(agent._configJson || '{}'),
-        },
-      });
-      await refresh();
-    } catch (ex) {
-      setErr(ex.message);
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const deleteAgent = async (agent) => {
-    if (!confirm(`Delete "${agent.name}"? Run history will also be removed.`)) return;
-    setBusy('delete:' + agent.id);
-    setErr('');
-    try {
-      await api('/admin/blog-agents/' + agent.id, { method: 'DELETE' });
-      if (expanded === agent.id) setExpanded(null);
-      await refresh();
-    } catch (ex) {
-      setErr(ex.message);
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const resetAgent = async (agent) => {
-    setBusy('reset:' + agent.id);
-    setErr('');
-    try {
-      await api('/admin/blog-agents/' + agent.id + '/reset', { method: 'POST' });
-      await refreshAgents();
-    } catch (ex) {
-      setErr(ex.message);
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const patchLocal = (id, patch) => {
-    setAgents((list) => list.map((a) => (a.id === id ? { ...a, ...patch } : a)));
-  };
-
-  return (
-    <div>
-      <h2 className="text-xl font-semibold">Blog writing agents</h2>
-      <p className="mt-1 max-w-2xl text-sm text-slate-400">
-        Run and monitor automated blog pipelines. Implement logic in <code className="text-indigo-300">server/agents/</code> — each module exports a default async function that reports steps via <code className="text-indigo-300">ctx.step()</code>.
-      </p>
-      {err && <p className="mt-3 text-sm text-rose-400">{err}</p>}
-
-      <div className="mt-6 space-y-4">
-        {agents.map((agent) => {
-          const live = agent.is_active;
-          const stale = !live && ['running', 'paused', 'queued'].includes(agent.run_state);
-          const paused = live && agent.run_state === 'paused';
-          const enabled = agent._enabled !== undefined ? agent._enabled : agent.enabled;
-          const interval = agent._interval !== undefined ? agent._interval : (agent.schedule_interval_minutes ?? '');
-          const configJson = agent._configJson !== undefined ? agent._configJson : JSON.stringify(agent.config || {}, null, 2);
-          const liveLabel = stale
-            ? `${agent.name} — interrupted (stale — server lost track of this run)`
-            : agent.status_message
-              ? `${agent.name} — ${agent.status_message}`
-              : `${agent.name} — idle`;
-
-          return (
-            <div key={agent.id} className="rounded-xl border border-slate-600 bg-slate-900/80 p-5">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h3 className="text-lg font-semibold text-slate-50">{agent.name}</h3>
-                    <span className={'rounded-full px-2.5 py-0.5 text-xs font-medium uppercase ' + (stale ? AGENT_STATE_STYLES.idle : (AGENT_STATE_STYLES[agent.run_state] || AGENT_STATE_STYLES.idle))}>
-                      {stale ? 'stale' : agent.run_state}
-                    </span>
-                    {agent.enabled && <span className="text-xs text-indigo-300">scheduled</span>}
-                  </div>
-                  <p className="mt-1 text-sm text-slate-400">{agent.description}</p>
-                  <p className={'mt-2 font-mono text-sm ' + (stale ? 'text-amber-300/90' : 'text-emerald-300/90')}>{liveLabel}</p>
-                  {agent.current_step && live && (
-                    <p className="mt-1 text-xs text-slate-500">Step: {agent.current_step}</p>
-                  )}
-                  {live && (
-                    <p className="mt-1 text-xs text-emerald-400">● Live — status refreshes every 3s. Draft/analysis may take 30–90s with no new log lines.</p>
-                  )}
-                  {agent.last_error && (
-                    <p className="mt-2 text-sm text-rose-400">Last error: {agent.last_error}</p>
-                  )}
-                  <p className="mt-2 text-xs text-slate-500">
-                    Script: server/agents/{agent.script_module}.js
-                    {agent.last_run_at && ' · Last run ' + new Date(agent.last_run_at).toLocaleString()}
-                  </p>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {!live && !stale && (
-                    <Btn onClick={() => act(agent.id, 'start')} disabled={!!busy}>
-                      Start
-                    </Btn>
-                  )}
-                  {stale && (
-                    <Btn variant="danger" onClick={() => resetAgent(agent)} disabled={!!busy}>
-                      Reset
-                    </Btn>
-                  )}
-                  {live && !paused && (
-                    <Btn variant="ghost" onClick={() => act(agent.id, 'pause')} disabled={!!busy}>
-                      Pause
-                    </Btn>
-                  )}
-                  {live && paused && (
-                    <Btn onClick={() => act(agent.id, 'resume')} disabled={!!busy}>
-                      Resume
-                    </Btn>
-                  )}
-                  {live && (
-                    <Btn variant="danger" onClick={() => act(agent.id, 'stop')} disabled={!!busy}>
-                      Stop
-                    </Btn>
-                  )}
-                  <Btn variant="ghost" onClick={() => openHistory(agent)}>
-                    {expanded === agent.id ? 'Hide log' : 'History'}
-                  </Btn>
-                  {!live && !stale && (
-                    <Btn variant="danger" onClick={() => deleteAgent(agent)} disabled={!!busy}>
-                      Delete
-                    </Btn>
-                  )}
-                </div>
-              </div>
-
-              <div className="mt-4 grid gap-3 border-t border-slate-700/80 pt-4 sm:grid-cols-3">
-                <Field label="Auto-run on schedule">
-                  <label className="flex items-center gap-2 text-sm text-slate-200">
-                    <input
-                      type="checkbox"
-                      checked={!!enabled}
-                      onChange={(e) => patchLocal(agent.id, { _enabled: e.target.checked })}
-                    />
-                    Enabled
-                  </label>
-                </Field>
-                <Field label="Interval (minutes)">
-                  <input
-                    className={inputCls()}
-                    type="number"
-                    min="0"
-                    placeholder="Manual only"
-                    value={interval}
-                    onChange={(e) => patchLocal(agent.id, { _interval: e.target.value })}
-                  />
-                </Field>
-                <Field label="Config JSON">
-                  <textarea
-                    className={inputCls('font-mono text-xs')}
-                    rows={2}
-                    value={configJson}
-                    onChange={(e) => patchLocal(agent.id, { _configJson: e.target.value })}
-                  />
-                </Field>
-              </div>
-              <div className="mt-2">
-                <Btn variant="ghost" onClick={() => saveSettings({ ...agent, _enabled: enabled, _interval: interval, _configJson: configJson })} disabled={!!busy}>
-                  Save schedule & config
-                </Btn>
-              </div>
-
-              {expanded === agent.id && (
-                <div className="mt-4 grid gap-4 lg:grid-cols-2">
-                  <div>
-                    <h4 className="text-sm font-medium text-slate-300">Recent runs</h4>
-                    <ul className="mt-2 max-h-48 space-y-1 overflow-y-auto text-xs text-slate-400">
-                      {runs.map((run) => (
-                        <li key={run.id} className="rounded border border-slate-700/80 px-2 py-1.5">
-                          <span className="text-slate-200">#{run.id}</span> {run.status} · {run.trigger}
-                          {run.status_message && ' — ' + run.status_message}
-                          <span className="block text-slate-500">{new Date(run.created_at).toLocaleString()}</span>
-                        </li>
-                      ))}
-                      {runs.length === 0 && <li className="text-slate-500">No runs yet</li>}
-                    </ul>
-                  </div>
-                  <div>
-                    <h4 className="text-sm font-medium text-slate-300">Step log</h4>
-                    <ul ref={logListRef} className="mt-2 max-h-48 space-y-1 overflow-y-auto font-mono text-xs">
-                      {logs.map((log) => (
-                        <li key={log.id} className={'rounded px-2 py-1 ' + (log.level === 'error' ? 'text-rose-300' : 'text-slate-400')}>
-                          [{new Date(log.created_at).toLocaleTimeString()}]
-                          {log.step ? ` ${log.step}:` : ''} {log.message}
-                        </li>
-                      ))}
-                      {logs.length === 0 && <li className="text-slate-500">No log lines yet</li>}
-                    </ul>
-                  </div>
-                </div>
-              )}
-            </div>
-          );
-        })}
-        {agents.length === 0 && (
-          <p className="text-sm text-slate-500">No agents registered. Run migration 009_blog_agents.sql.</p>
-        )}
-      </div>
-    </div>
-  );
-}
-
 function BlogPostPreview({ post, onClose }) {
-  const body = Array.isArray(post.body) ? post.body : [];
   const date = post.published_at
     ? new Date(post.published_at).toLocaleDateString()
     : 'Unpublished draft';
+  const html = post.body_html || '';
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4" onClick={onClose}>
@@ -691,18 +380,10 @@ function BlogPostPreview({ post, onClose }) {
           {post.excerpt && (
             <p className="mt-3 text-[15px] italic leading-relaxed text-slate-400">{post.excerpt}</p>
           )}
-          <div className="mt-6 flex flex-col gap-4 text-[15px] leading-relaxed text-slate-200">
-            {body.length === 0 && <p className="text-slate-500">No body content yet.</p>}
-            {body.map((block, i) => {
-              if (String(block).startsWith('### ')) {
-                return <h3 key={i} className="text-base font-semibold text-white">{String(block).slice(4)}</h3>;
-              }
-              if (String(block).startsWith('## ')) {
-                return <h2 key={i} className="text-lg font-semibold text-white">{String(block).slice(3)}</h2>;
-              }
-              return <p key={i}>{block}</p>;
-            })}
-          </div>
+          <div
+            className="blog-article-body mt-6 text-[15px] leading-relaxed text-slate-200"
+            dangerouslySetInnerHTML={{ __html: html || '<p class=\"text-slate-500\">No body content yet.</p>' }}
+          />
           {post.status === 'draft' && (
             <p className="mt-6 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
               Draft preview — not visible on the public site until published.
@@ -716,63 +397,64 @@ function BlogPostPreview({ post, onClose }) {
 
 function BlogSection() {
   const [rows, setRows] = useState([]);
-  const [edit, setEdit] = useState(null);
+  const [editorPost, setEditorPost] = useState(undefined);
   const [preview, setPreview] = useState(null);
-  const load = () => api('/admin/blog').then(r => setRows(r.posts));
+
+  const load = () => api('/admin/blog').then((r) => setRows(r.posts));
+
   useEffect(() => { load(); }, []);
-  const save = async () => {
-    const body = { ...edit, body: JSON.parse(edit.bodyJson || '[]'), published_at: edit.published_at || null };
-    if (edit.id) await api('/admin/blog/' + edit.id, { method: 'PUT', body });
-    else await api('/admin/blog', { method: 'POST', body });
-    setEdit(null); load();
-  };
+
   const publish = async (row) => {
     if (!confirm(`Publish "${row.title}"?`)) return;
     await api('/admin/blog/' + row.id + '/publish', { method: 'POST' });
     load();
   };
+
+  const handleSave = async (data) => {
+    if (data.id) {
+      await api('/admin/blog/' + data.id, { method: 'PUT', body: data });
+    } else {
+      await api('/admin/blog', { method: 'POST', body: data });
+    }
+    setEditorPost(undefined);
+    load();
+  };
+
+  if (editorPost !== undefined) {
+    return (
+      <BlogEditor
+        post={editorPost}
+        api={api}
+        onBack={() => setEditorPost(undefined)}
+        onSave={handleSave}
+      />
+    );
+  }
+
   return (
     <div>
-      <div className="mb-4 flex justify-between"><h2 className="text-xl font-semibold">Blog</h2><Btn onClick={() => setEdit({ title:'', status:'draft', bodyJson:'[]', read_time:'5 min' })}>Add post</Btn></div>
+      <div className="mb-4 flex justify-between">
+        <div>
+          <h2 className="text-xl font-semibold">Blog</h2>
+          <p className="mt-1 text-sm text-slate-400">AI-powered writing studio with recommended topic ideas.</p>
+        </div>
+        <Btn onClick={() => setEditorPost(null)}>Create post</Btn>
+      </div>
       <Table
         columns={[
           { key: 'title', label: 'Title' },
           { key: 'status', label: 'Status' },
-          { key: 'published_at', label: 'Published', render: r => r.published_at ? new Date(r.published_at).toLocaleDateString() : '—' },
+          { key: 'published_at', label: 'Published', render: (r) => r.published_at ? new Date(r.published_at).toLocaleDateString() : '—' },
         ]}
         rows={rows}
         onView={(r) => setPreview(r)}
         extraActions={(r) => r.status === 'draft' ? (
           <Btn className="ml-2" onClick={() => publish(r)}>Publish</Btn>
         ) : null}
-        onEdit={(r) => setEdit({ ...r, bodyJson: JSON.stringify(r.body || [], null, 2), published_at: r.published_at ? r.published_at.slice(0, 16) : '' })}
+        onEdit={(r) => setEditorPost(r)}
         onDelete={async (r) => { if (confirm('Delete?')) { await api('/admin/blog/' + r.id, { method: 'DELETE' }); load(); } }}
       />
       {preview && <BlogPostPreview post={preview} onClose={() => setPreview(null)} />}
-      {edit && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => setEdit(null)}>
-          <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-slate-600 bg-slate-900 p-6" onClick={e=>e.stopPropagation()}>
-            <h3 className="text-lg font-semibold">{edit.id?'Edit':'New'} post</h3>
-            <div className="mt-4 grid gap-3">
-              <Field label="Title"><input className={inputCls()} value={edit.title||''} onChange={e=>setEdit({...edit,title:e.target.value})} /></Field>
-              <Field label="Slug"><input className={inputCls()} value={edit.slug||''} onChange={e=>setEdit({...edit,slug:e.target.value})} /></Field>
-              <Field label="Status"><select className={inputCls()} value={edit.status||'draft'} onChange={e=>setEdit({...edit,status:e.target.value})}><option value="draft">draft</option><option value="published">published</option></select></Field>
-              <Field label="Publish at (local)"><input type="datetime-local" className={inputCls()} value={edit.published_at||''} onChange={e=>setEdit({...edit,published_at:e.target.value?new Date(e.target.value).toISOString():null})} /></Field>
-              <Field label="Read time"><input className={inputCls()} value={edit.read_time||''} onChange={e=>setEdit({...edit,read_time:e.target.value})} /></Field>
-              <Field label="Excerpt"><textarea className={inputCls()} rows={2} value={edit.excerpt||''} onChange={e=>setEdit({...edit,excerpt:e.target.value})} /></Field>
-              <Field label="Body paragraphs JSON"><textarea className={inputCls('font-mono text-xs')} rows={6} value={edit.bodyJson||'[]'} onChange={e=>setEdit({...edit,bodyJson:e.target.value})} /></Field>
-            </div>
-            <div className="mt-6 flex flex-wrap gap-2">
-              <Btn onClick={save}>Save</Btn>
-              <Btn variant="ghost" onClick={() => setPreview({ ...edit, body: JSON.parse(edit.bodyJson || '[]') })}>Preview</Btn>
-              {edit.id && edit.status === 'draft' && (
-                <Btn onClick={async () => { await publish(edit); setEdit(null); }}>Publish</Btn>
-              )}
-              <Btn variant="ghost" onClick={()=>setEdit(null)}>Cancel</Btn>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -1062,7 +744,6 @@ const NAV = [
   ['dashboard', 'Dashboard'],
   ['products', 'Products'],
   ['blog', 'Blog'],
-  ['blog-agents', 'Blog agents'],
   ['portfolio', 'Portfolio'],
   ['home-apps', 'Home apps'],
   ['calendar', 'Calendar'],
@@ -1083,7 +764,6 @@ function AdminApp({ user, onLogout }) {
     dashboard: <Dashboard stats={stats} />,
     products: <ProductsSection />,
     blog: <BlogSection />,
-    'blog-agents': <BlogAgentsSection />,
     portfolio: <PortfolioSection />,
     'home-apps': <HomeAppsSection />,
     calendar: <CalendarSection />,

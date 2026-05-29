@@ -13,7 +13,8 @@ import homeRoutes from './routes/home.js';
 import adminRoutes from './routes/admin.js';
 import { pool } from './db.js';
 import { ensureUploadDirs } from './lib/uploads.js';
-import { startBlogAgentScheduler } from './lib/blogAgentRunner.js';
+import { startBlogIdeasScheduler } from './lib/blogIdeasScheduler.js';
+import { migrateBlogBodyToHtml } from './lib/blogMigrate.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, '..');
@@ -120,7 +121,12 @@ if (existsSync(distDir)) {
   console.warn('cbdev-server: dist/ not found — API only until you run npm run build');
 }
 
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`cbdev-server: listening on http://127.0.0.1:${PORT}`);
-  startBlogAgentScheduler();
+  try {
+    await migrateBlogBodyToHtml();
+  } catch (err) {
+    console.error('blog body migration:', err.message);
+  }
+  startBlogIdeasScheduler();
 });

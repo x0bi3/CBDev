@@ -1,5 +1,5 @@
 /**
- * Shared discovery utilities for blog agents — fetch, parse, score, rank, dedupe.
+ * Blog ideas research — fetch, score, rank trending topics for CreativeBuilds blog.
  */
 
 const USER_AGENT = 'CreativeBuildsBlogAgent/1.0';

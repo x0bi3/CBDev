@@ -2,11 +2,12 @@ import { Router } from 'express';
 import { query } from '../db.js';
 import { requireAdmin } from '../auth.js';
 import { productImageUpload } from '../lib/uploads.js';
-import blogAgentsRoutes from './blogAgents.js';
+import { sanitizeHtml, resolveBodyHtml } from '../lib/blogHtml.js';
+import { runBlogAssist } from '../lib/blogWritingAssist.js';
+import { refreshBlogIdeasNow } from '../lib/blogIdeasScheduler.js';
 
 const router = Router();
 router.use(requireAdmin);
-router.use('/blog-agents', blogAgentsRoutes);
 
 router.post('/uploads/product-image', (req, res) => {
   productImageUpload.single('image')(req, res, (err) => {
@@ -25,6 +26,25 @@ router.post('/uploads/product-image', (req, res) => {
 function slugify(text) {
   return String(text).toLowerCase().trim()
     .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'item';
+}
+
+async function ensureUniqueSlug(baseSlug, excludeId = null) {
+  const normalized = String(baseSlug || 'post').slice(0, 120) || 'post';
+  const check = async (slug) => {
+    const params = excludeId ? [slug, excludeId] : [slug];
+    const sql = excludeId
+      ? 'SELECT 1 FROM blog_posts WHERE slug = $1 AND id != $2 LIMIT 1'
+      : 'SELECT 1 FROM blog_posts WHERE slug = $1 LIMIT 1';
+    const { rows } = await query(sql, params);
+    return rows.length > 0;
+  };
+
+  if (!(await check(normalized))) return normalized;
+  for (let n = 2; n < 100; n++) {
+    const candidate = `${normalized.slice(0, 110)}-${n}`;
+    if (!(await check(candidate))) return candidate;
+  }
+  return `${normalized.slice(0, 100)}-${Date.now()}`;
 }
 
 router.get('/stats', async (_req, res) => {
@@ -121,31 +141,118 @@ router.delete('/categories/:slug', async (req, res) => {
 
 /* ---------- Blog ---------- */
 router.get('/blog', async (_req, res) => {
-  const { rows } = await query('SELECT * FROM blog_posts ORDER BY published_at DESC NULLS LAST, id DESC');
-  res.json({ posts: rows });
+  try {
+    const { rows } = await query('SELECT * FROM blog_posts ORDER BY published_at DESC NULLS LAST, id DESC');
+    res.json({
+      posts: rows.map((row) => ({
+        ...row,
+        body_html: resolveBodyHtml(row),
+      })),
+    });
+  } catch (err) {
+    console.error('admin blog list:', err);
+    res.status(500).json({ error: 'Failed to load posts' });
+  }
+});
+
+router.post('/blog/assist', async (req, res) => {
+  try {
+    const result = await runBlogAssist(req.body || {});
+    res.json(result);
+  } catch (err) {
+    console.error('blog assist:', err);
+    res.status(500).json({ error: err.message || 'Assist failed' });
+  }
+});
+
+router.get('/blog/ideas', async (_req, res) => {
+  try {
+    const { rows } = await query(
+      `SELECT * FROM blog_ideas WHERE status = 'suggested' ORDER BY score DESC, created_at DESC LIMIT 30`,
+    );
+    res.json({ ideas: rows });
+  } catch (err) {
+    console.error('blog ideas list:', err);
+    res.status(500).json({ error: 'Failed to load ideas' });
+  }
+});
+
+router.post('/blog/ideas/refresh', async (_req, res) => {
+  try {
+    const result = await refreshBlogIdeasNow();
+    res.json(result);
+  } catch (err) {
+    if (err.code === 'BUSY') {
+      res.status(409).json({ error: err.message });
+      return;
+    }
+    console.error('blog ideas refresh:', err);
+    res.status(500).json({ error: err.message || 'Refresh failed' });
+  }
+});
+
+router.post('/blog/ideas/:id/dismiss', async (req, res) => {
+  try {
+    const { rows } = await query(
+      `UPDATE blog_ideas SET status = 'dismissed' WHERE id = $1 RETURNING *`,
+      [req.params.id],
+    );
+    if (!rows[0]) { res.status(404).json({ error: 'Not found' }); return; }
+    res.json({ idea: rows[0] });
+  } catch (err) {
+    console.error('blog idea dismiss:', err);
+    res.status(500).json({ error: 'Failed to dismiss idea' });
+  }
+});
+
+router.post('/blog/ideas/:id/use', async (req, res) => {
+  try {
+    const { rows } = await query(
+      `UPDATE blog_ideas SET status = 'used', used_at = NOW() WHERE id = $1 RETURNING *`,
+      [req.params.id],
+    );
+    if (!rows[0]) { res.status(404).json({ error: 'Not found' }); return; }
+    res.json({ idea: rows[0] });
+  } catch (err) {
+    console.error('blog idea use:', err);
+    res.status(500).json({ error: 'Failed to mark idea used' });
+  }
 });
 
 router.post('/blog', async (req, res) => {
-  const b = req.body;
-  const slug = b.slug || slugify(b.title);
-  const { rows } = await query(
-    `INSERT INTO blog_posts (slug, title, excerpt, body, read_time, status, published_at)
-     VALUES ($1,$2,$3,$4::jsonb,$5,$6,$7) RETURNING *`,
-    [slug, b.title, b.excerpt || '', JSON.stringify(b.body || []), b.read_time || '',
-      b.status || 'draft', b.published_at || null],
-  );
-  res.status(201).json({ post: rows[0] });
+  try {
+    const b = req.body;
+    const slug = await ensureUniqueSlug(b.slug || slugify(b.title));
+    const bodyHtml = sanitizeHtml(b.body_html || '');
+    const { rows } = await query(
+      `INSERT INTO blog_posts (slug, title, excerpt, body, body_html, read_time, status, published_at)
+       VALUES ($1,$2,$3,'[]'::jsonb,$4,$5,$6,$7) RETURNING *`,
+      [slug, b.title, b.excerpt || '', bodyHtml, b.read_time || '',
+        b.status || 'draft', b.published_at || null],
+    );
+    res.status(201).json({ post: { ...rows[0], body_html: bodyHtml } });
+  } catch (err) {
+    console.error('admin blog create:', err);
+    res.status(500).json({ error: err.message || 'Failed to create post' });
+  }
 });
 
 router.put('/blog/:id', async (req, res) => {
-  const b = req.body;
-  const { rows } = await query(
-    `UPDATE blog_posts SET slug=$1, title=$2, excerpt=$3, body=$4::jsonb, read_time=$5, status=$6, published_at=$7
-     WHERE id=$8 RETURNING *`,
-    [b.slug, b.title, b.excerpt, JSON.stringify(b.body || []), b.read_time, b.status, b.published_at, req.params.id],
-  );
-  if (!rows[0]) { res.status(404).json({ error: 'Not found' }); return; }
-  res.json({ post: rows[0] });
+  try {
+    const b = req.body;
+    const slug = await ensureUniqueSlug(b.slug || slugify(b.title), Number(req.params.id));
+    const bodyHtml = sanitizeHtml(b.body_html || '');
+    const { rows } = await query(
+      `UPDATE blog_posts SET slug=$1, title=$2, excerpt=$3, body_html=$4, read_time=$5, status=$6, published_at=$7
+       WHERE id=$8 RETURNING *`,
+      [slug, b.title, b.excerpt, bodyHtml, b.read_time, b.status, b.published_at, req.params.id],
+    );
+    if (!rows[0]) { res.status(404).json({ error: 'Not found' }); return; }
+    res.json({ post: { ...rows[0], body_html: bodyHtml } });
+  } catch (err) {
+    console.error('admin blog update:', err);
+    res.status(500).json({ error: err.message || 'Failed to update post' });
+  }
 });
 
 router.post('/blog/:id/publish', async (req, res) => {

@@ -12,6 +12,11 @@
     "start:server": "node server/index.js"
   },
   "dependencies": {
+    "@tiptap/extension-link": "^3.23.6",
+    "@tiptap/extension-placeholder": "^3.23.6",
+    "@tiptap/pm": "^3.23.6",
+    "@tiptap/react": "^3.23.6",
+    "@tiptap/starter-kit": "^3.23.6",
     "bcryptjs": "^2.4.3",
     "express": "^4.21.2",
     "framer-motion": "^11.11.17",
