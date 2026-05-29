@@ -13,6 +13,7 @@ import homeRoutes from './routes/home.js';
 import adminRoutes from './routes/admin.js';
 import { pool } from './db.js';
 import { ensureUploadDirs } from './lib/uploads.js';
+import { startBlogAgentScheduler } from './lib/blogAgentRunner.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, '..');
@@ -116,4 +117,5 @@ if (existsSync(distDir)) {
 
 app.listen(PORT, () => {
   console.log(`cbdev-server: listening on http://127.0.0.1:${PORT}`);
+  startBlogAgentScheduler();
 });

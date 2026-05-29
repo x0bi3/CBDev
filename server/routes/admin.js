@@ -2,9 +2,11 @@ import { Router } from 'express';
 import { query } from '../db.js';
 import { requireAdmin } from '../auth.js';
 import { productImageUpload } from '../lib/uploads.js';
+import blogAgentsRoutes from './blogAgents.js';
 
 const router = Router();
 router.use(requireAdmin);
+router.use('/blog-agents', blogAgentsRoutes);
 
 router.post('/uploads/product-image', (req, res) => {
   productImageUpload.single('image')(req, res, (err) => {

@@ -353,6 +353,240 @@ function ProductsSection() {
   );
 }
 
+const AGENT_STATE_STYLES = {
+  idle: 'bg-slate-700 text-slate-200',
+  queued: 'bg-amber-900/60 text-amber-200',
+  running: 'bg-emerald-900/60 text-emerald-200',
+  paused: 'bg-orange-900/60 text-orange-200',
+};
+
+function BlogAgentsSection() {
+  const [agents, setAgents] = useState([]);
+  const [expanded, setExpanded] = useState(null);
+  const [runs, setRuns] = useState([]);
+  const [logs, setLogs] = useState([]);
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(null);
+
+  const load = useCallback(() => {
+    return api('/admin/blog-agents').then((r) => setAgents(r.agents)).catch((ex) => setErr(ex.message));
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const anyLive = agents.some((a) => ['running', 'paused', 'queued'].includes(a.run_state));
+
+  useEffect(() => {
+    if (!anyLive) return;
+    const t = setInterval(load, 2000);
+    return () => clearInterval(t);
+  }, [anyLive, load]);
+
+  const openHistory = async (agent) => {
+    if (expanded === agent.id) {
+      setExpanded(null);
+      return;
+    }
+    setExpanded(agent.id);
+    const [r, l] = await Promise.all([
+      api('/admin/blog-agents/' + agent.id + '/runs?limit=15'),
+      api('/admin/blog-agents/' + agent.id + '/logs?limit=80'),
+    ]);
+    setRuns(r.runs);
+    setLogs(l.logs);
+  };
+
+  const act = async (agentId, action) => {
+    setBusy(agentId + ':' + action);
+    setErr('');
+    try {
+      await api('/admin/blog-agents/' + agentId + '/' + action, { method: 'POST' });
+      await load();
+      if (expanded === agentId) {
+        const [r, l] = await Promise.all([
+          api('/admin/blog-agents/' + agentId + '/runs?limit=15'),
+          api('/admin/blog-agents/' + agentId + '/logs?limit=80'),
+        ]);
+        setRuns(r.runs);
+        setLogs(l.logs);
+      }
+    } catch (ex) {
+      setErr(ex.message);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const saveSettings = async (agent) => {
+    setBusy('save:' + agent.id);
+    setErr('');
+    try {
+      await api('/admin/blog-agents/' + agent.id, {
+        method: 'PUT',
+        body: {
+          enabled: agent._enabled,
+          schedule_interval_minutes: agent._interval === '' ? null : Number(agent._interval),
+          config: JSON.parse(agent._configJson || '{}'),
+        },
+      });
+      await load();
+    } catch (ex) {
+      setErr(ex.message);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const patchLocal = (id, patch) => {
+    setAgents((list) => list.map((a) => (a.id === id ? { ...a, ...patch } : a)));
+  };
+
+  return (
+    <div>
+      <h2 className="text-xl font-semibold">Blog writing agents</h2>
+      <p className="mt-1 max-w-2xl text-sm text-slate-400">
+        Run and monitor automated blog pipelines. Implement logic in <code className="text-indigo-300">server/agents/</code> — each module exports a default async function that reports steps via <code className="text-indigo-300">ctx.step()</code>.
+      </p>
+      {err && <p className="mt-3 text-sm text-rose-400">{err}</p>}
+
+      <div className="mt-6 space-y-4">
+        {agents.map((agent) => {
+          const running = ['running', 'paused', 'queued'].includes(agent.run_state);
+          const paused = agent.run_state === 'paused';
+          const enabled = agent._enabled !== undefined ? agent._enabled : agent.enabled;
+          const interval = agent._interval !== undefined ? agent._interval : (agent.schedule_interval_minutes ?? '');
+          const configJson = agent._configJson !== undefined ? agent._configJson : JSON.stringify(agent.config || {}, null, 2);
+          const liveLabel = agent.status_message
+            ? `${agent.name} — ${agent.status_message}`
+            : `${agent.name} — idle`;
+
+          return (
+            <div key={agent.id} className="rounded-xl border border-slate-600 bg-slate-900/80 p-5">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="text-lg font-semibold text-slate-50">{agent.name}</h3>
+                    <span className={'rounded-full px-2.5 py-0.5 text-xs font-medium uppercase ' + (AGENT_STATE_STYLES[agent.run_state] || AGENT_STATE_STYLES.idle)}>
+                      {agent.run_state}
+                    </span>
+                    {agent.enabled && <span className="text-xs text-indigo-300">scheduled</span>}
+                  </div>
+                  <p className="mt-1 text-sm text-slate-400">{agent.description}</p>
+                  <p className="mt-2 font-mono text-sm text-emerald-300/90">{liveLabel}</p>
+                  {agent.current_step && running && (
+                    <p className="mt-1 text-xs text-slate-500">Step: {agent.current_step}</p>
+                  )}
+                  {agent.last_error && (
+                    <p className="mt-2 text-sm text-rose-400">Last error: {agent.last_error}</p>
+                  )}
+                  <p className="mt-2 text-xs text-slate-500">
+                    Script: server/agents/{agent.script_module}.js
+                    {agent.last_run_at && ' · Last run ' + new Date(agent.last_run_at).toLocaleString()}
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {!running && (
+                    <Btn onClick={() => act(agent.id, 'start')} disabled={!!busy}>
+                      Start
+                    </Btn>
+                  )}
+                  {running && !paused && (
+                    <Btn variant="ghost" onClick={() => act(agent.id, 'pause')} disabled={!!busy}>
+                      Pause
+                    </Btn>
+                  )}
+                  {paused && (
+                    <Btn onClick={() => act(agent.id, 'resume')} disabled={!!busy}>
+                      Resume
+                    </Btn>
+                  )}
+                  {running && (
+                    <Btn variant="danger" onClick={() => act(agent.id, 'stop')} disabled={!!busy}>
+                      Stop
+                    </Btn>
+                  )}
+                  <Btn variant="ghost" onClick={() => openHistory(agent)}>
+                    {expanded === agent.id ? 'Hide log' : 'History'}
+                  </Btn>
+                </div>
+              </div>
+
+              <div className="mt-4 grid gap-3 border-t border-slate-700/80 pt-4 sm:grid-cols-3">
+                <Field label="Auto-run on schedule">
+                  <label className="flex items-center gap-2 text-sm text-slate-200">
+                    <input
+                      type="checkbox"
+                      checked={!!enabled}
+                      onChange={(e) => patchLocal(agent.id, { _enabled: e.target.checked })}
+                    />
+                    Enabled
+                  </label>
+                </Field>
+                <Field label="Interval (minutes)">
+                  <input
+                    className={inputCls()}
+                    type="number"
+                    min="0"
+                    placeholder="Manual only"
+                    value={interval}
+                    onChange={(e) => patchLocal(agent.id, { _interval: e.target.value })}
+                  />
+                </Field>
+                <Field label="Config JSON">
+                  <textarea
+                    className={inputCls('font-mono text-xs')}
+                    rows={2}
+                    value={configJson}
+                    onChange={(e) => patchLocal(agent.id, { _configJson: e.target.value })}
+                  />
+                </Field>
+              </div>
+              <div className="mt-2">
+                <Btn variant="ghost" onClick={() => saveSettings({ ...agent, _enabled: enabled, _interval: interval, _configJson: configJson })} disabled={!!busy}>
+                  Save schedule & config
+                </Btn>
+              </div>
+
+              {expanded === agent.id && (
+                <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                  <div>
+                    <h4 className="text-sm font-medium text-slate-300">Recent runs</h4>
+                    <ul className="mt-2 max-h-48 space-y-1 overflow-y-auto text-xs text-slate-400">
+                      {runs.map((run) => (
+                        <li key={run.id} className="rounded border border-slate-700/80 px-2 py-1.5">
+                          <span className="text-slate-200">#{run.id}</span> {run.status} · {run.trigger}
+                          {run.status_message && ' — ' + run.status_message}
+                          <span className="block text-slate-500">{new Date(run.created_at).toLocaleString()}</span>
+                        </li>
+                      ))}
+                      {runs.length === 0 && <li className="text-slate-500">No runs yet</li>}
+                    </ul>
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-medium text-slate-300">Step log</h4>
+                    <ul className="mt-2 max-h-48 space-y-1 overflow-y-auto font-mono text-xs">
+                      {logs.map((log) => (
+                        <li key={log.id} className={'rounded px-2 py-1 ' + (log.level === 'error' ? 'text-rose-300' : 'text-slate-400')}>
+                          [{new Date(log.created_at).toLocaleTimeString()}]
+                          {log.step ? ` ${log.step}:` : ''} {log.message}
+                        </li>
+                      ))}
+                      {logs.length === 0 && <li className="text-slate-500">No log lines yet</li>}
+                    </ul>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+        {agents.length === 0 && (
+          <p className="text-sm text-slate-500">No agents registered. Run migration 009_blog_agents.sql.</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function BlogSection() {
   const [rows, setRows] = useState([]);
   const [edit, setEdit] = useState(null);
@@ -674,6 +908,7 @@ const NAV = [
   ['dashboard', 'Dashboard'],
   ['products', 'Products'],
   ['blog', 'Blog'],
+  ['blog-agents', 'Blog agents'],
   ['portfolio', 'Portfolio'],
   ['home-apps', 'Home apps'],
   ['calendar', 'Calendar'],
@@ -694,6 +929,7 @@ function AdminApp({ user, onLogout }) {
     dashboard: <Dashboard stats={stats} />,
     products: <ProductsSection />,
     blog: <BlogSection />,
+    'blog-agents': <BlogAgentsSection />,
     portfolio: <PortfolioSection />,
     'home-apps': <HomeAppsSection />,
     calendar: <CalendarSection />,
