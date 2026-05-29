@@ -14,7 +14,6 @@ import { generateJSON } from '../lib/llm.js';
 const DEFAULT_TAGS = ['nextjs', 'nodejs', 'stripe', 'postgres', 'supabase'];
 const DEFAULT_FEEDS = [
   'https://stripe.com/blog/feed.rss',
-  'https://stripe.com/newsroom/news/feed',
 ];
 const SEED_CANDIDATES = [
   {
@@ -53,6 +52,7 @@ export default async function run(ctx) {
   }
 
   await ctx.step('analyze', 'Selecting monetization primitive for small-business MVP…');
+  await ctx.log('Calling OpenAI to analyze Stripe billing candidates…', 'info', 'analyze');
   const validationResult = await analyzeCandidates(externalData, allowedTags);
   await ctx.checkpoint();
 
@@ -62,6 +62,8 @@ export default async function run(ctx) {
   }
 
   await ctx.step('draft', 'Synthesizing Stripe MVP monetization tutorial…');
+  await ctx.log('Calling OpenAI to generate article (typically 30–90 seconds)…', 'info', 'draft');
+  await ctx.checkpoint();
   const builtContent = await draftStructuredPost(validationResult.targetData, allowedTags);
   await ctx.checkpoint();
 

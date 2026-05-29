@@ -367,16 +367,29 @@ function BlogAgentsSection() {
   const [logs, setLogs] = useState([]);
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(null);
-  const logEndRef = useRef(null);
+  const logListRef = useRef(null);
+  const lastLogIdRef = useRef(null);
 
-  const loadHistory = useCallback(async (agentId) => {
+  const loadHistory = useCallback(async (agentId, runId) => {
     if (!agentId) return;
+    const logsPath = runId
+      ? `/admin/blog-agents/${agentId}/logs?limit=80&run_id=${runId}`
+      : `/admin/blog-agents/${agentId}/logs?limit=80`;
     const [r, l] = await Promise.all([
       api('/admin/blog-agents/' + agentId + '/runs?limit=15'),
-      api('/admin/blog-agents/' + agentId + '/logs?limit=80'),
+      api(logsPath),
     ]);
     setRuns(r.runs);
+    const newestId = l.logs[l.logs.length - 1]?.id ?? null;
+    if (newestId === lastLogIdRef.current) return;
+    lastLogIdRef.current = newestId;
     setLogs(l.logs);
+    requestAnimationFrame(() => {
+      const el = logListRef.current;
+      if (!el) return;
+      const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 64;
+      if (nearBottom) el.scrollTop = el.scrollHeight;
+    });
   }, []);
 
   const refreshAgents = useCallback(async () => {
@@ -386,8 +399,12 @@ function BlogAgentsSection() {
   }, []);
 
   const refresh = useCallback(async () => {
-    await refreshAgents();
-    if (expanded) await loadHistory(expanded);
+    const list = await refreshAgents();
+    if (expanded) {
+      const agent = list.find((a) => a.id === expanded);
+      const runId = agent?.is_active ? agent.active_run_id : null;
+      await loadHistory(expanded, runId);
+    }
   }, [expanded, loadHistory, refreshAgents]);
 
   useEffect(() => {
@@ -400,22 +417,21 @@ function BlogAgentsSection() {
     if (!anyLive) return;
     const t = setInterval(() => {
       refresh().catch((ex) => setErr(ex.message));
-    }, 2000);
+    }, 3000);
     return () => clearInterval(t);
   }, [anyLive, refresh]);
-
-  useEffect(() => {
-    logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [logs]);
 
   const openHistory = async (agent) => {
     if (expanded === agent.id) {
       setExpanded(null);
+      lastLogIdRef.current = null;
       return;
     }
     setExpanded(agent.id);
+    lastLogIdRef.current = null;
     try {
-      await loadHistory(agent.id);
+      const runId = agent.is_active ? agent.active_run_id : null;
+      await loadHistory(agent.id, runId);
     } catch (ex) {
       setErr(ex.message);
     }
@@ -525,6 +541,9 @@ function BlogAgentsSection() {
                   {agent.current_step && live && (
                     <p className="mt-1 text-xs text-slate-500">Step: {agent.current_step}</p>
                   )}
+                  {live && (
+                    <p className="mt-1 text-xs text-emerald-400">● Live — status refreshes every 3s. Draft/analysis may take 30–90s with no new log lines.</p>
+                  )}
                   {agent.last_error && (
                     <p className="mt-2 text-sm text-rose-400">Last error: {agent.last_error}</p>
                   )}
@@ -623,7 +642,7 @@ function BlogAgentsSection() {
                   </div>
                   <div>
                     <h4 className="text-sm font-medium text-slate-300">Step log</h4>
-                    <ul className="mt-2 max-h-48 space-y-1 overflow-y-auto font-mono text-xs">
+                    <ul ref={logListRef} className="mt-2 max-h-48 space-y-1 overflow-y-auto font-mono text-xs">
                       {logs.map((log) => (
                         <li key={log.id} className={'rounded px-2 py-1 ' + (log.level === 'error' ? 'text-rose-300' : 'text-slate-400')}>
                           [{new Date(log.created_at).toLocaleTimeString()}]
@@ -631,7 +650,6 @@ function BlogAgentsSection() {
                         </li>
                       ))}
                       {logs.length === 0 && <li className="text-slate-500">No log lines yet</li>}
-                      <li ref={logEndRef} aria-hidden="true" />
                     </ul>
                   </div>
                 </div>

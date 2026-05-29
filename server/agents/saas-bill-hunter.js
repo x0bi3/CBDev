@@ -54,6 +54,7 @@ export default async function run(ctx) {
   }
 
   await ctx.step('analyze', 'Evaluating candidates against technical scope and build feasibility…');
+  await ctx.log('Calling OpenAI to analyze SaaS pain-point candidates…', 'info', 'analyze');
   const validationResult = await analyzeCandidates(externalData, allowedTags);
   await ctx.checkpoint();
 
@@ -63,6 +64,8 @@ export default async function run(ctx) {
   }
 
   await ctx.step('draft', 'Synthesizing SEO-optimized SaaS alternative article…');
+  await ctx.log('Calling OpenAI to generate article (typically 30–90 seconds)…', 'info', 'draft');
+  await ctx.checkpoint();
   const builtContent = await draftStructuredPost(validationResult.targetData, allowedTags);
   await ctx.checkpoint();
 

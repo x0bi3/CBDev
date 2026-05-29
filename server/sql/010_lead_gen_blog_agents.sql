@@ -48,8 +48,7 @@ VALUES
       "maxItems": 5,
       "autoPublish": false,
       "feedUrls": [
-        "https://stripe.com/blog/feed.rss",
-        "https://stripe.com/newsroom/news/feed"
+        "https://stripe.com/blog/feed.rss"
       ]
     }'::jsonb
   )
