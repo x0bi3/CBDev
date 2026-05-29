@@ -7,6 +7,8 @@ import {
   resumeAgent,
   stopAgent,
   isAgentActive,
+  reconcileStaleAgents,
+  resetStaleAgent,
 } from '../lib/blogAgentRunner.js';
 
 const router = Router();
@@ -35,6 +37,7 @@ function mapAgent(row) {
 
 router.get('/', async (_req, res) => {
   try {
+    await reconcileStaleAgents();
     const { rows } = await query(
       `SELECT * FROM blog_agents ORDER BY name`,
     );
@@ -170,6 +173,24 @@ router.post('/:id/stop', async (req, res) => {
     return;
   }
   res.json({ ok: true, message: 'Stop requested' });
+});
+
+router.post('/:id/reset', async (req, res) => {
+  try {
+    const row = await resetStaleAgent(Number(req.params.id));
+    res.json({ ok: true, agent: mapAgent(row) });
+  } catch (err) {
+    if (err.code === 'STILL_ACTIVE') {
+      res.status(409).json({ error: err.message });
+      return;
+    }
+    if (err.code === 'NOT_FOUND') {
+      res.status(404).json({ error: 'Agent not found' });
+      return;
+    }
+    console.error('blog-agents reset:', err);
+    res.status(500).json({ error: 'Failed to reset agent' });
+  }
 });
 
 router.delete('/:id', async (req, res) => {

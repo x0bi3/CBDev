@@ -220,6 +220,66 @@ export function stopAgent(agentId) {
   return true;
 }
 
+/** Clear DB run_state when no in-memory job exists (e.g. after server restart). */
+export async function reconcileStaleAgents() {
+  const { rows } = await query(
+    `SELECT id, active_run_id FROM blog_agents WHERE run_state IN ('queued', 'running', 'paused')`,
+  );
+  let fixed = 0;
+  for (const agent of rows) {
+    if (active.has(agent.id)) continue;
+    if (agent.active_run_id) {
+      await query(
+        `UPDATE blog_agent_runs SET status = 'stopped', error_message = $2,
+          finished_at = COALESCE(finished_at, NOW()), status_message = $2
+         WHERE id = $1 AND status IN ('queued', 'running', 'paused')`,
+        [agent.active_run_id, 'Run interrupted — server restarted while agent was active'],
+      );
+    }
+    await touchAgent(agent.id, {
+      run_state: 'idle',
+      current_step: '',
+      status_message: 'Run interrupted — server restarted',
+      active_run_id: null,
+    });
+    fixed += 1;
+    console.log(`blog-agent: reconciled stale agent #${agent.id}`);
+  }
+  return fixed;
+}
+
+export async function resetStaleAgent(agentId) {
+  if (active.has(agentId)) {
+    const err = new Error('Agent is still running in memory — use Stop first');
+    err.code = 'STILL_ACTIVE';
+    throw err;
+  }
+  const agent = await loadAgent(agentId);
+  if (!agent) {
+    const err = new Error('Agent not found');
+    err.code = 'NOT_FOUND';
+    throw err;
+  }
+  if (!['queued', 'running', 'paused'].includes(agent.run_state)) {
+    return agent;
+  }
+  if (agent.active_run_id) {
+    await query(
+      `UPDATE blog_agent_runs SET status = 'stopped', error_message = $2,
+        finished_at = COALESCE(finished_at, NOW()), status_message = $2
+       WHERE id = $1 AND status IN ('queued', 'running', 'paused')`,
+      [agent.active_run_id, 'Run reset by admin'],
+    );
+  }
+  await touchAgent(agentId, {
+    run_state: 'idle',
+    current_step: '',
+    status_message: 'Reset by admin',
+    active_run_id: null,
+  });
+  return loadAgent(agentId);
+}
+
 export async function tickScheduledAgents() {
   const { rows } = await query(`
     SELECT id, slug, schedule_interval_minutes, last_run_at
@@ -249,6 +309,7 @@ export async function tickScheduledAgents() {
 
 export function startBlogAgentScheduler() {
   if (schedulerTimer) return;
+  reconcileStaleAgents().catch(console.error);
   tickScheduledAgents().catch(console.error);
   schedulerTimer = setInterval(() => {
     tickScheduledAgents().catch(console.error);

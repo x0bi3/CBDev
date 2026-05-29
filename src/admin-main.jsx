@@ -379,29 +379,30 @@ function BlogAgentsSection() {
     setLogs(l.logs);
   }, []);
 
-  const refresh = useCallback(async () => {
+  const refreshAgents = useCallback(async () => {
     const r = await api('/admin/blog-agents');
     setAgents(r.agents);
-    if (expanded) await loadHistory(expanded);
     return r.agents;
-  }, [expanded, loadHistory]);
+  }, []);
+
+  const refresh = useCallback(async () => {
+    await refreshAgents();
+    if (expanded) await loadHistory(expanded);
+  }, [expanded, loadHistory, refreshAgents]);
 
   useEffect(() => {
-    refresh().catch((ex) => setErr(ex.message));
-  }, [refresh]);
+    refreshAgents().catch((ex) => setErr(ex.message));
+  }, [refreshAgents]);
 
-  const anyLive = agents.some((a) => ['running', 'paused', 'queued'].includes(a.run_state));
-  const expandedLive = expanded != null && agents.some(
-    (a) => a.id === expanded && ['running', 'paused', 'queued'].includes(a.run_state),
-  );
+  const anyLive = agents.some((a) => a.is_active);
 
   useEffect(() => {
-    if (!anyLive && !expandedLive) return;
+    if (!anyLive) return;
     const t = setInterval(() => {
       refresh().catch((ex) => setErr(ex.message));
     }, 2000);
     return () => clearInterval(t);
-  }, [anyLive, expandedLive, refresh]);
+  }, [anyLive, refresh]);
 
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -469,6 +470,19 @@ function BlogAgentsSection() {
     }
   };
 
+  const resetAgent = async (agent) => {
+    setBusy('reset:' + agent.id);
+    setErr('');
+    try {
+      await api('/admin/blog-agents/' + agent.id + '/reset', { method: 'POST' });
+      await refreshAgents();
+    } catch (ex) {
+      setErr(ex.message);
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const patchLocal = (id, patch) => {
     setAgents((list) => list.map((a) => (a.id === id ? { ...a, ...patch } : a)));
   };
@@ -483,14 +497,17 @@ function BlogAgentsSection() {
 
       <div className="mt-6 space-y-4">
         {agents.map((agent) => {
-          const running = ['running', 'paused', 'queued'].includes(agent.run_state);
-          const paused = agent.run_state === 'paused';
+          const live = agent.is_active;
+          const stale = !live && ['running', 'paused', 'queued'].includes(agent.run_state);
+          const paused = live && agent.run_state === 'paused';
           const enabled = agent._enabled !== undefined ? agent._enabled : agent.enabled;
           const interval = agent._interval !== undefined ? agent._interval : (agent.schedule_interval_minutes ?? '');
           const configJson = agent._configJson !== undefined ? agent._configJson : JSON.stringify(agent.config || {}, null, 2);
-          const liveLabel = agent.status_message
-            ? `${agent.name} — ${agent.status_message}`
-            : `${agent.name} — idle`;
+          const liveLabel = stale
+            ? `${agent.name} — interrupted (stale — server lost track of this run)`
+            : agent.status_message
+              ? `${agent.name} — ${agent.status_message}`
+              : `${agent.name} — idle`;
 
           return (
             <div key={agent.id} className="rounded-xl border border-slate-600 bg-slate-900/80 p-5">
@@ -498,14 +515,14 @@ function BlogAgentsSection() {
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <h3 className="text-lg font-semibold text-slate-50">{agent.name}</h3>
-                    <span className={'rounded-full px-2.5 py-0.5 text-xs font-medium uppercase ' + (AGENT_STATE_STYLES[agent.run_state] || AGENT_STATE_STYLES.idle)}>
-                      {agent.run_state}
+                    <span className={'rounded-full px-2.5 py-0.5 text-xs font-medium uppercase ' + (stale ? AGENT_STATE_STYLES.idle : (AGENT_STATE_STYLES[agent.run_state] || AGENT_STATE_STYLES.idle))}>
+                      {stale ? 'stale' : agent.run_state}
                     </span>
                     {agent.enabled && <span className="text-xs text-indigo-300">scheduled</span>}
                   </div>
                   <p className="mt-1 text-sm text-slate-400">{agent.description}</p>
-                  <p className="mt-2 font-mono text-sm text-emerald-300/90">{liveLabel}</p>
-                  {agent.current_step && running && (
+                  <p className={'mt-2 font-mono text-sm ' + (stale ? 'text-amber-300/90' : 'text-emerald-300/90')}>{liveLabel}</p>
+                  {agent.current_step && live && (
                     <p className="mt-1 text-xs text-slate-500">Step: {agent.current_step}</p>
                   )}
                   {agent.last_error && (
@@ -517,22 +534,27 @@ function BlogAgentsSection() {
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  {!running && (
+                  {!live && !stale && (
                     <Btn onClick={() => act(agent.id, 'start')} disabled={!!busy}>
                       Start
                     </Btn>
                   )}
-                  {running && !paused && (
+                  {stale && (
+                    <Btn variant="danger" onClick={() => resetAgent(agent)} disabled={!!busy}>
+                      Reset
+                    </Btn>
+                  )}
+                  {live && !paused && (
                     <Btn variant="ghost" onClick={() => act(agent.id, 'pause')} disabled={!!busy}>
                       Pause
                     </Btn>
                   )}
-                  {paused && (
+                  {live && paused && (
                     <Btn onClick={() => act(agent.id, 'resume')} disabled={!!busy}>
                       Resume
                     </Btn>
                   )}
-                  {running && (
+                  {live && (
                     <Btn variant="danger" onClick={() => act(agent.id, 'stop')} disabled={!!busy}>
                       Stop
                     </Btn>
@@ -540,7 +562,7 @@ function BlogAgentsSection() {
                   <Btn variant="ghost" onClick={() => openHistory(agent)}>
                     {expanded === agent.id ? 'Hide log' : 'History'}
                   </Btn>
-                  {!running && (
+                  {!live && !stale && (
                     <Btn variant="danger" onClick={() => deleteAgent(agent)} disabled={!!busy}>
                       Delete
                     </Btn>
