@@ -140,9 +140,11 @@ function DeviceProvider({ children }) {
   authRef.current = auth;
   const [authOpen, setAuthOpen] = useState(false);
   const [screenApps, setScreenApps] = useState({ home: homeApps, dock: dockApps });
+  const screenAppsRef = useRef(screenApps);
+  screenAppsRef.current = screenApps;
 
-  useEffect(() => {
-    api('/home/apps', { auth: false })
+  const loadScreenApps = useCallback(() => {
+    api('/home/apps')
       .then((r) => {
         setScreenApps({
           home: r.home?.length ? r.home.map(mapHomeAppFromApi) : homeApps,
@@ -151,6 +153,8 @@ function DeviceProvider({ children }) {
       })
       .catch(() => { /* keep defaults */ });
   }, []);
+
+  useEffect(() => { loadScreenApps(); }, [loadScreenApps, auth]);
 
   // --- Music engine: src+play side-effect runs when station changes ---
   useEffect(() => {
@@ -191,7 +195,9 @@ function DeviceProvider({ children }) {
   }, []);
 
   const openApp = useCallback((id) => {
-    if (id === 'calendar' && !authRef.current) {
+    const meta = screenAppsRef.current.home.find((a) => a.id === id)
+      || screenAppsRef.current.dock.find((a) => a.id === id);
+    if (meta?.requiresAuth && !authRef.current) {
       setCcOpen(false);
       setMiniPlayerOpen(false);
       setAuthOpen(true);
@@ -277,7 +283,7 @@ function DeviceProvider({ children }) {
     openAppId, prevAppId, shellAppId, openApp, closeApp, handleShellExitComplete,
     ccOpen, toggleCc, closeCc,
     appOrder, setAppOrder, resetAppOrder,
-    auth, setAuth, authOpen, openAuth, closeAuth, screenApps,
+    auth, setAuth, authOpen, openAuth, closeAuth, screenApps, findApp: (id) => findApp(id, screenApps),
     profileBtnRef, themeBtnRef, musicBtnRef,
     // music
     audioRef,
@@ -307,10 +313,10 @@ const homeApps = [
   { id:'project-c', label:'Project C', tile:'linear-gradient(135deg,#34d399,#065f46)', glyph:'🌿' },
 ];
 const calendarApp = {
-  id:'calendar', label:'Calendar', tile:'linear-gradient(135deg,#34d399,#0f766e)', glyph:'📅',
+  id:'calendar', label:'Calendar', tile:'linear-gradient(135deg,#34d399,#0f766e)', glyph:'📅', requiresAuth: true,
 };
 
-function resolveHomeApps(appOrder, isAuthed, baseHome = homeApps) {
+function resolveHomeApps(appOrder, baseHome = homeApps) {
   const byId = Object.fromEntries(baseHome.map(a => [a.id, a]));
   const baseIds = appOrder && Array.isArray(appOrder) ? appOrder : baseHome.map(a => a.id);
   const seen = new Set();
@@ -321,7 +327,7 @@ function resolveHomeApps(appOrder, isAuthed, baseHome = homeApps) {
   for (const a of baseHome) {
     if (!seen.has(a.id)) { out.push(a); seen.add(a.id); }
   }
-  return isAuthed ? out : out.filter((a) => !a.requiresAuth);
+  return out;
 }
 
 function mapHomeAppFromApi(a) {
@@ -332,6 +338,7 @@ function mapHomeAppFromApi(a) {
     tile: a.tile,
     portfolioSlug: a.portfolioSlug || null,
     requiresAuth: !!a.requiresAuth,
+    assignUsers: !!a.assignUsers,
   };
 }
 const dockApps = [
@@ -342,6 +349,13 @@ const dockApps = [
 ];
 const allApps = [...homeApps, calendarApp, ...dockApps];
 const getApp = id => allApps.find(a => a.id === id);
+
+function findApp(id, screenApps) {
+  if (!id) return null;
+  const fromScreen = screenApps?.home?.find((a) => a.id === id)
+    || screenApps?.dock?.find((a) => a.id === id);
+  return fromScreen || getApp(id);
+}
 
 /* ========================= SHARED APP UI ========================= */
 function AppShell({ title, subtitle, children }) {
@@ -2065,10 +2079,37 @@ function CalendarApp() {
   );
 }
 
+function ClientAppStub({ title, subtitle, children }) {
+  return (
+    <AppShell title={title} subtitle={subtitle}>
+      <Card>
+        {children || (
+          <p className="text-[14px] text-white/70">
+            This app is enabled for your account. Full functionality can be wired up per client site.
+          </p>
+        )}
+      </Card>
+    </AppShell>
+  );
+}
+
+function InventoryApp() {
+  return (
+    <ClientAppStub
+      title="Inventory"
+      subtitle="Manage products for your site"
+    >
+      <p className="text-[14px] text-white/70">
+        Client inventory management will live here — add/edit products for sites we build for you.
+      </p>
+    </ClientAppStub>
+  );
+}
+
 const appViews = {
   about:AboutApp, contact:ContactApp, services:ServicesApp, portfolio:PortfolioApp,
   merch:MerchApp, legal:LegalApp, blog:BlogApp, settings:SettingsApp,
-  support:SupportApp, music:MusicApp, calendar:CalendarApp,
+  support:SupportApp, music:MusicApp, calendar:CalendarApp, inventory:InventoryApp,
   'project-a':makeProjectApp('project-a'),
   'project-b':makeProjectApp('project-b'),
   'project-c':makeProjectApp('project-c'),
@@ -2078,7 +2119,13 @@ function getAppComponent(app) {
   if (!app) return null;
   if (appViews[app.id]) return appViews[app.id];
   const slug = app.portfolioSlug || app.id;
-  if (slug) return makeProjectApp(slug);
+  if (slug && !app.assignUsers) return makeProjectApp(slug);
+  if (app.label) {
+    const title = app.label;
+    return function GenericAssignedApp() {
+      return <ClientAppStub title={title} subtitle="Assigned app" />;
+    };
+  }
   return null;
 }
 
@@ -2308,8 +2355,8 @@ function HomeGrid() {
   const scrollerRef = React.useRef(null);
 
   const orderedApps = React.useMemo(
-    () => resolveHomeApps(appOrder, !!auth, screenApps.home),
-    [appOrder, auth, screenApps.home],
+    () => resolveHomeApps(appOrder, screenApps.home),
+    [appOrder, screenApps.home],
   );
 
   const fullPages = Math.ceil(orderedApps.length / PAGE_SIZE) || 0;
@@ -2417,7 +2464,7 @@ function HomeGrid() {
 /* Reusable dots, driven by context. */
 function PageDots() {
   const { homePage, setHomePage, appOrder, auth, screenApps } = useDevice();
-  const visibleCount = resolveHomeApps(appOrder, !!auth, screenApps.home).length;
+  const visibleCount = resolveHomeApps(appOrder, screenApps.home).length;
   const fullPages = Math.ceil(visibleCount / PAGE_SIZE) || 0;
   const total = fullPages + 1;
   const scrollTo = (idx) => {
@@ -2461,7 +2508,7 @@ const CONTENT_CLOSE_S = 0.30;
 const TILE_CLOSE_S = 1.30; // 1s longer than content so tile lingers during morph-back
 
 function AppView({ app, isOpen, onClose, onExitComplete }) {
-  const { openAppId, prevAppId, openApp, dragLocked } = useDevice();
+  const { openAppId, prevAppId, openApp, dragLocked, findApp: resolveApp } = useDevice();
   const View = getAppComponent(app);
 
   const entryRef = React.useRef(null);
@@ -2472,7 +2519,7 @@ function AppView({ app, isOpen, onClose, onExitComplete }) {
     };
   }
   const { crossNav: enteredViaCrossNav, fromAppId } = entryRef.current;
-  const fromApp = fromAppId ? getApp(fromAppId) : null;
+  const fromApp = fromAppId ? resolveApp(fromAppId) : null;
 
   const tileLayoutIdRef = React.useRef(
     enteredViaCrossNav ? undefined : ('app-tile-' + app.id)

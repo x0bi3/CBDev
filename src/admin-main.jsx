@@ -197,36 +197,113 @@ function PortfolioSection() {
 
 function HomeAppsSection() {
   const [rows, setRows] = useState([]);
+  const [allUsers, setAllUsers] = useState([]);
   const [edit, setEdit] = useState(null);
   const load = () => api('/admin/home-apps').then(r => setRows(r.apps));
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    api('/admin/users').then(r => setAllUsers(r.users || [])).catch(() => {});
+  }, []);
+  const openEdit = async (row) => {
+    const base = row || {
+      app_id: '', label: '', glyph: '📱', tile: 'linear-gradient(135deg,#6366f1,#8b5cf6)',
+      screen: 'home', active: true, requires_auth: false, assign_users: false, user_ids: [],
+    };
+    if (row?.id) {
+      const a = await api('/admin/home-apps/' + row.id + '/assignments');
+      setEdit({ ...base, user_ids: a.user_ids || [] });
+    } else {
+      setEdit(base);
+    }
+  };
+  const toggleUser = (uid) => {
+    const ids = new Set(edit.user_ids || []);
+    if (ids.has(uid)) ids.delete(uid); else ids.add(uid);
+    setEdit({ ...edit, user_ids: [...ids] });
+  };
   const save = async () => {
-    if (edit.id) await api('/admin/home-apps/' + edit.id, { method: 'PUT', body: edit });
-    else await api('/admin/home-apps', { method: 'POST', body: edit });
+    const body = {
+      ...edit,
+      requires_auth: !!edit.requires_auth || !!edit.assign_users,
+      user_ids: edit.assign_users ? (edit.user_ids || []) : [],
+    };
+    if (edit.id) await api('/admin/home-apps/' + edit.id, { method: 'PUT', body });
+    else await api('/admin/home-apps', { method: 'POST', body });
     setEdit(null); load();
+  };
+  const accessLabel = (r) => {
+    if (r.assign_users) return `assigned (${r.assignee_count || 0})`;
+    if (r.requires_auth) return 'signed-in';
+    return 'public';
   };
   return (
     <div>
-      <div className="mb-4 flex justify-between"><h2 className="text-xl font-semibold">Home & dock apps</h2><Btn onClick={() => setEdit({ app_id:'', label:'', glyph:'📱', tile:'linear-gradient(135deg,#6366f1,#8b5cf6)', screen:'home', active:true })}>Add app</Btn></div>
-      <Table columns={[{key:'app_id',label:'ID'},{key:'label',label:'Label'},{key:'screen',label:'Screen'},{key:'requires_auth',label:'Auth only',render:r=>r.requires_auth?'yes':'no'},{key:'portfolio_slug',label:'Portfolio slug'}]} rows={rows} onEdit={setEdit} onDelete={async r=>{if(confirm('Delete?')){await api('/admin/home-apps/'+r.id,{method:'DELETE'});load();}}} />
+      <div className="mb-4 flex justify-between">
+        <h2 className="text-xl font-semibold">Home & dock apps</h2>
+        <Btn onClick={() => openEdit(null)}>Add app</Btn>
+      </div>
+      <p className="mb-4 text-sm text-slate-400">
+        Public apps show for everyone. &quot;Signed-in&quot; apps appear for any logged-in user.
+        &quot;Assigned&quot; apps only appear for selected users (inventory, chatbot, etc.).
+      </p>
+      <Table
+        columns={[
+          { key: 'app_id', label: 'ID' },
+          { key: 'label', label: 'Label' },
+          { key: 'screen', label: 'Screen' },
+          { key: 'access', label: 'Access', render: accessLabel },
+          { key: 'active', label: 'Active', render: r => r.active ? 'yes' : 'no' },
+          { key: 'portfolio_slug', label: 'Portfolio slug' },
+        ]}
+        rows={rows}
+        onEdit={openEdit}
+        onDelete={async r => { if (confirm('Delete?')) { await api('/admin/home-apps/' + r.id, { method: 'DELETE' }); load(); } }}
+      />
       {edit && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => setEdit(null)}>
-          <div className="w-full max-w-md rounded-2xl border border-slate-600 bg-slate-900 p-6" onClick={e=>e.stopPropagation()}>
-            <h3 className="text-lg font-semibold">{edit.id?'Edit':'New'} app icon</h3>
+          <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-slate-600 bg-slate-900 p-6" onClick={e => e.stopPropagation()}>
+            <h3 className="text-lg font-semibold">{edit.id ? 'Edit' : 'New'} app icon</h3>
             <div className="mt-4 grid gap-3">
-              <Field label="App ID"><input className={inputCls()} value={edit.app_id||''} onChange={e=>setEdit({...edit,app_id:e.target.value})} /></Field>
-              <Field label="Label"><input className={inputCls()} value={edit.label||''} onChange={e=>setEdit({...edit,label:e.target.value})} /></Field>
-              <Field label="Glyph"><input className={inputCls()} value={edit.glyph||''} onChange={e=>setEdit({...edit,glyph:e.target.value})} /></Field>
-              <Field label="Tile gradient"><input className={inputCls()} value={edit.tile||''} onChange={e=>setEdit({...edit,tile:e.target.value})} /></Field>
-              <Field label="Screen"><select className={inputCls()} value={edit.screen||'home'} onChange={e=>setEdit({...edit,screen:e.target.value})}><option value="home">home</option><option value="dock">dock</option></select></Field>
-              <Field label="Portfolio slug (project tiles)"><input className={inputCls()} value={edit.portfolio_slug||''} onChange={e=>setEdit({...edit,portfolio_slug:e.target.value||null})} placeholder="optional" /></Field>
-              <Field label="Sort order"><input type="number" className={inputCls()} value={edit.sort_order||0} onChange={e=>setEdit({...edit,sort_order:Number(e.target.value)})} /></Field>
+              <Field label="App ID"><input className={inputCls()} value={edit.app_id || ''} onChange={e => setEdit({ ...edit, app_id: e.target.value })} placeholder="inventory, chatbot, …" /></Field>
+              <Field label="Label"><input className={inputCls()} value={edit.label || ''} onChange={e => setEdit({ ...edit, label: e.target.value })} /></Field>
+              <Field label="Glyph"><input className={inputCls()} value={edit.glyph || ''} onChange={e => setEdit({ ...edit, glyph: e.target.value })} /></Field>
+              <Field label="Tile gradient"><input className={inputCls()} value={edit.tile || ''} onChange={e => setEdit({ ...edit, tile: e.target.value })} /></Field>
+              <Field label="Screen"><select className={inputCls()} value={edit.screen || 'home'} onChange={e => setEdit({ ...edit, screen: e.target.value })}><option value="home">home</option><option value="dock">dock</option></select></Field>
+              <Field label="Portfolio slug (project tiles)"><input className={inputCls()} value={edit.portfolio_slug || ''} onChange={e => setEdit({ ...edit, portfolio_slug: e.target.value || null })} placeholder="optional" /></Field>
+              <Field label="Sort order"><input type="number" className={inputCls()} value={edit.sort_order || 0} onChange={e => setEdit({ ...edit, sort_order: Number(e.target.value) })} /></Field>
               <label className="flex items-center gap-2 text-sm text-slate-300">
-                <input type="checkbox" checked={!!edit.requires_auth} onChange={e=>setEdit({...edit,requires_auth:e.target.checked})} />
-                Requires sign-in (e.g. Calendar)
+                <input type="checkbox" checked={edit.active !== false} onChange={e => setEdit({ ...edit, active: e.target.checked })} />
+                Active (visible when access rules match)
               </label>
+              <label className="flex items-center gap-2 text-sm text-slate-300">
+                <input type="checkbox" checked={!!edit.requires_auth} disabled={!!edit.assign_users} onChange={e => setEdit({ ...edit, requires_auth: e.target.checked })} />
+                Require sign-in (any logged-in user)
+              </label>
+              <label className="flex items-center gap-2 text-sm text-slate-300">
+                <input type="checkbox" checked={!!edit.assign_users} onChange={e => setEdit({
+                  ...edit,
+                  assign_users: e.target.checked,
+                  requires_auth: e.target.checked ? true : edit.requires_auth,
+                })} />
+                Assign to specific users only
+              </label>
+              {edit.assign_users && (
+                <div className="rounded-lg border border-slate-600 bg-slate-800/50 p-3">
+                  <p className="text-xs font-medium text-slate-400">Assigned users</p>
+                  <div className="mt-2 max-h-40 space-y-1 overflow-y-auto">
+                    {allUsers.length === 0 && <p className="text-sm text-slate-500">No users yet — register accounts on the main site first.</p>}
+                    {allUsers.map(u => (
+                      <label key={u.id} className="flex cursor-pointer items-center gap-2 text-sm text-slate-200">
+                        <input type="checkbox" checked={(edit.user_ids || []).includes(u.id)} onChange={() => toggleUser(u.id)} />
+                        <span>{u.email}</span>
+                        {u.name && <span className="text-slate-500">({u.name})</span>}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
-            <div className="mt-6 flex gap-2"><Btn onClick={save}>Save</Btn><Btn variant="ghost" onClick={()=>setEdit(null)}>Cancel</Btn></div>
+            <div className="mt-6 flex gap-2"><Btn onClick={save}>Save</Btn><Btn variant="ghost" onClick={() => setEdit(null)}>Cancel</Btn></div>
           </div>
         </div>
       )}

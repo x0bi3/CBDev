@@ -166,30 +166,74 @@ router.delete('/portfolio/:id', async (req, res) => {
   res.json({ ok: true });
 });
 
+/* ---------- Users (for app assignment) ---------- */
+router.get('/users', async (_req, res) => {
+  const { rows } = await query(
+    `SELECT id, email, name, role, created_at FROM users ORDER BY email`,
+  );
+  res.json({ users: rows });
+});
+
 /* ---------- Home apps ---------- */
+async function syncHomeAppAssignments(homeAppId, userIds) {
+  await query('DELETE FROM user_home_apps WHERE home_app_id = $1', [homeAppId]);
+  if (!userIds?.length) return;
+  const ids = [...new Set(userIds.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))];
+  for (const uid of ids) {
+    await query(
+      'INSERT INTO user_home_apps (user_id, home_app_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+      [uid, homeAppId],
+    );
+  }
+}
+
 router.get('/home-apps', async (_req, res) => {
-  const { rows } = await query('SELECT * FROM home_apps ORDER BY screen, sort_order, id');
+  const { rows } = await query(
+    `SELECT h.*,
+      (SELECT count(*)::int FROM user_home_apps u WHERE u.home_app_id = h.id) AS assignee_count
+     FROM home_apps h
+     ORDER BY h.screen, h.sort_order, h.id`,
+  );
   res.json({ apps: rows });
+});
+
+router.get('/home-apps/:id/assignments', async (req, res) => {
+  const { rows } = await query(
+    `SELECT u.id, u.email, u.name, u.role
+     FROM user_home_apps uha
+     JOIN users u ON u.id = uha.user_id
+     WHERE uha.home_app_id = $1
+     ORDER BY u.email`,
+    [req.params.id],
+  );
+  res.json({ users: rows, user_ids: rows.map((r) => r.id) });
 });
 
 router.post('/home-apps', async (req, res) => {
   const b = req.body;
+  const assignUsers = !!b.assign_users;
   const { rows } = await query(
-    `INSERT INTO home_apps (app_id, label, glyph, tile, screen, portfolio_slug, sort_order, requires_auth, active)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
-    [b.app_id, b.label, b.glyph || '📱', b.tile, b.screen || 'home', b.portfolio_slug || null, b.sort_order ?? 0, !!b.requires_auth, b.active !== false],
+    `INSERT INTO home_apps (app_id, label, glyph, tile, screen, portfolio_slug, sort_order, requires_auth, assign_users, active)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+    [b.app_id, b.label, b.glyph || '📱', b.tile, b.screen || 'home', b.portfolio_slug || null, b.sort_order ?? 0,
+      !!b.requires_auth || assignUsers, assignUsers, b.active !== false],
   );
+  if (assignUsers && b.user_ids) await syncHomeAppAssignments(rows[0].id, b.user_ids);
   res.status(201).json({ app: rows[0] });
 });
 
 router.put('/home-apps/:id', async (req, res) => {
   const b = req.body;
+  const assignUsers = !!b.assign_users;
   const { rows } = await query(
-    `UPDATE home_apps SET app_id=$1, label=$2, glyph=$3, tile=$4, screen=$5, portfolio_slug=$6, sort_order=$7, requires_auth=$8, active=$9
-     WHERE id=$10 RETURNING *`,
-    [b.app_id, b.label, b.glyph, b.tile, b.screen, b.portfolio_slug || null, b.sort_order ?? 0, !!b.requires_auth, b.active !== false, req.params.id],
+    `UPDATE home_apps SET app_id=$1, label=$2, glyph=$3, tile=$4, screen=$5, portfolio_slug=$6, sort_order=$7,
+      requires_auth=$8, assign_users=$9, active=$10
+     WHERE id=$11 RETURNING *`,
+    [b.app_id, b.label, b.glyph, b.tile, b.screen, b.portfolio_slug || null, b.sort_order ?? 0,
+      !!b.requires_auth || assignUsers, assignUsers, b.active !== false, req.params.id],
   );
   if (!rows[0]) { res.status(404).json({ error: 'Not found' }); return; }
+  if (b.user_ids !== undefined) await syncHomeAppAssignments(rows[0].id, b.user_ids);
   res.json({ app: rows[0] });
 });
 
