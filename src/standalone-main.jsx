@@ -2077,9 +2077,7 @@ function AppView({ app, isOpen, onClose, onExitComplete }) {
       return;
     }
     if (morphClose) {
-      // Let content/tile fades + layout morph finish; 200ms was unmounting before they ran.
-      const fallbackMs = TILE_CLOSE_S * 1000 + 150;
-      const fallback = setTimeout(finishExit, fallbackMs);
+      const fallback = setTimeout(finishExit, 200);
       return () => clearTimeout(fallback);
     }
     let cancelled = false;
@@ -2116,10 +2114,7 @@ function AppView({ app, isOpen, onClose, onExitComplete }) {
       }}
       initial={enteredViaCrossNav ? { x: '100%', opacity: 0.6, scale: 1 } : false}
       animate={useControlsAnimate ? controls : undefined}
-      transition={{ layout: layoutTween, default: contentCloseMotion }}
-      onLayoutAnimationComplete={() => {
-        if (!isOpen && morphClose) finishExit();
-      }}>
+      transition={{ layout: layoutTween, default: contentCloseMotion }}>
       {morphClose && (
         <motion.div
           aria-hidden
@@ -2631,11 +2626,13 @@ function Device() {
       <Wallpaper theme={theme} dimmed={!!openAppId} />
       <LayoutGroup>
         <div className="pointer-events-none absolute inset-x-0 top-0 z-50">
-          {/* Legibility scrim: fades dark-translucent → transparent so the white
-              status-bar text and brand wordmark stay readable on bright/blueish
-              wallpapers without making the area look like a solid bar. */}
+          {/* Top scrim: near-solid black at the status bar, fades to 0 at the bottom. */}
           <div aria-hidden="true"
-            className="pointer-events-none absolute inset-x-0 top-0 h-[110px] bg-gradient-to-b from-black/50 via-black/20 to-transparent" />
+            className="pointer-events-none absolute inset-x-0 top-0 h-[128px]"
+            style={{
+              background:'linear-gradient(to bottom, rgba(0,0,0,0.82) 0%, rgba(0,0,0,0.72) 28%, rgba(0,0,0,0.38) 58%, rgba(0,0,0,0.08) 82%, rgba(0,0,0,0) 100%)',
+            }}
+          />
           <div className="relative pointer-events-auto" style={{ paddingTop:'max(env(safe-area-inset-top),12px)' }}>
             <StatusBar />
           </div>
