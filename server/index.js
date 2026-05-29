@@ -8,6 +8,7 @@ import productsRoutes from './routes/products.js';
 import portfolioRoutes from './routes/portfolio.js';
 import blogRoutes from './routes/blog.js';
 import ticketsRoutes from './routes/tickets.js';
+import calendarRoutes from './routes/calendar.js';
 import { pool } from './db.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -54,6 +55,7 @@ app.use('/api/products', productsRoutes);
 app.use('/api/portfolio', portfolioRoutes);
 app.use('/api/blog', blogRoutes);
 app.use('/api/tickets', ticketsRoutes);
+app.use('/api/calendar', calendarRoutes);
 
 if (existsSync(distDir)) {
   app.use(express.static(distDir, { index: false }));
