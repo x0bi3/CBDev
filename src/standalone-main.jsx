@@ -92,6 +92,58 @@ async function api(path, opts = {}) {
   return data;
 }
 
+/* GET response cache — avoids refetching stable catalogs on every app open */
+const API_CACHE_TTL = {
+  catalog: 30 * 60 * 1000,
+  blog: 10 * 60 * 1000,
+  calendarTypes: 30 * 60 * 1000,
+  calendarBookings: 60 * 1000,
+  homeApps: 10 * 60 * 1000,
+};
+const apiCacheStore = new Map();
+const apiCacheInflight = new Map();
+
+function apiCacheKey(path, opts = {}, userId = null) {
+  const method = (opts.method || 'GET').toUpperCase();
+  if (method !== 'GET') return null;
+  const scope = opts.auth === false ? 'public' : `user:${userId || 'anon'}`;
+  return `${scope}:${path}`;
+}
+
+function invalidateApiCache(prefix) {
+  for (const key of [...apiCacheStore.keys()]) {
+    if (!prefix || key.startsWith(prefix)) apiCacheStore.delete(key);
+  }
+}
+
+async function apiCached(path, opts = {}, ttlMs = API_CACHE_TTL.catalog, userId = null) {
+  const key = apiCacheKey(path, opts, userId);
+  if (!key) return api(path, opts);
+
+  const now = Date.now();
+  const hit = apiCacheStore.get(key);
+  if (hit && now - hit.fetchedAt < hit.ttl) return hit.data;
+
+  if (hit) {
+    if (!apiCacheInflight.has(key)) {
+      apiCacheInflight.set(key, api(path, opts).then((data) => {
+        apiCacheStore.set(key, { data, fetchedAt: Date.now(), ttl: ttlMs });
+        return data;
+      }).finally(() => apiCacheInflight.delete(key)));
+    }
+    return hit.data;
+  }
+
+  if (apiCacheInflight.has(key)) return apiCacheInflight.get(key);
+
+  const req = api(path, opts).then((data) => {
+    apiCacheStore.set(key, { data, fetchedAt: Date.now(), ttl: ttlMs });
+    return data;
+  }).finally(() => apiCacheInflight.delete(key));
+  apiCacheInflight.set(key, req);
+  return req;
+}
+
 /* ========================= CONTEXT ========================= */
 const DeviceCtx = createContext(null);
 const useDevice = () => useContext(DeviceCtx);
@@ -144,7 +196,7 @@ function DeviceProvider({ children }) {
   screenAppsRef.current = screenApps;
 
   const loadScreenApps = useCallback(() => {
-    api('/home/apps')
+    apiCached('/home/apps', {}, API_CACHE_TTL.homeApps, auth?.id)
       .then((r) => {
         setScreenApps({
           home: r.home?.length ? r.home.map(mapHomeAppFromApi) : homeApps,
@@ -152,9 +204,12 @@ function DeviceProvider({ children }) {
         });
       })
       .catch(() => { /* keep defaults */ });
-  }, []);
+  }, [auth?.id]);
 
-  useEffect(() => { loadScreenApps(); }, [loadScreenApps, auth]);
+  useEffect(() => {
+    invalidateApiCache('user:');
+    loadScreenApps();
+  }, [loadScreenApps, auth?.id]);
 
   // --- Music engine: src+play side-effect runs when station changes ---
   useEffect(() => {
@@ -747,7 +802,7 @@ function PortfolioApp() {
   const [selected, setSelected] = useState(null);
   const [projects, setProjects] = useState(work);
   useEffect(() => {
-    api('/portfolio', { auth: false })
+    apiCached('/portfolio', { auth: false }, API_CACHE_TTL.catalog)
       .then((r) => { if (r.projects?.length) setProjects(r.projects); })
       .catch(() => { /* keep fallback work[] */ });
   }, []);
@@ -864,8 +919,8 @@ function MerchApp() {
 
   useEffect(() => {
     Promise.all([
-      api('/products', { auth: false }),
-      api('/products/categories', { auth: false }),
+      apiCached('/products', { auth: false }, API_CACHE_TTL.catalog),
+      apiCached('/products/categories', { auth: false }, API_CACHE_TTL.catalog),
     ]).then(([prodRes, catRes]) => {
       if (prodRes.products?.length) setProductList(prodRes.products);
       if (catRes.categories?.length) setCategoryList(catRes.categories);
@@ -1321,7 +1376,7 @@ function BlogApp() {
   const [subErr, setSubErr] = useState(null);
 
   useEffect(() => {
-    api('/blog', { auth: false })
+    apiCached('/blog', { auth: false }, API_CACHE_TTL.blog)
       .then((r) => { if (r.posts?.length) setPostList(r.posts); })
       .catch(() => { /* keep fallback posts[] */ });
   }, []);
@@ -1891,7 +1946,8 @@ function makeProjectApp(projectId) {
   return function ProjectStandaloneApp() {
     const [project, setProject] = useState(() => work.find(p => p.id === projectId) || null);
     useEffect(() => {
-      api('/portfolio/' + encodeURIComponent(projectId), { auth: false })
+      const path = '/portfolio/' + encodeURIComponent(projectId);
+      apiCached(path, { auth: false }, API_CACHE_TTL.catalog)
         .then((r) => { if (r.project) setProject(r.project); })
         .catch(() => {});
     }, []);
@@ -1963,13 +2019,16 @@ function CalendarApp() {
   const [booking, setBooking] = useState(null);
   const dates = React.useMemo(() => nextWeekdayDates(12), []);
 
-  const loadUpcoming = useCallback(() => {
-    return api('/calendar/bookings').then((r) => setUpcoming(r.bookings || [])).catch(() => {});
-  }, []);
+  const loadUpcoming = useCallback((force = false) => {
+    if (force) invalidateApiCache(`user:${auth?.id || 'anon'}:/calendar/bookings`);
+    return apiCached('/calendar/bookings', {}, API_CACHE_TTL.calendarBookings, auth?.id)
+      .then((r) => setUpcoming(r.bookings || []))
+      .catch(() => {});
+  }, [auth?.id]);
 
   useEffect(() => {
     if (!auth) return;
-    api('/calendar/types')
+    apiCached('/calendar/types', {}, API_CACHE_TTL.calendarTypes, auth.id)
       .then((r) => {
         const list = r.types || [];
         setTypes(list);
@@ -2002,7 +2061,7 @@ function CalendarApp() {
       });
       setBooking(r.booking);
       setStep('done');
-      loadUpcoming();
+      loadUpcoming(true);
     } catch (e) {
       setErr(e.message || 'Booking failed');
     } finally {
@@ -2015,7 +2074,7 @@ function CalendarApp() {
     setErr(null);
     try {
       await api(`/calendar/bookings/${id}`, { method: 'DELETE' });
-      await loadUpcoming();
+      await loadUpcoming(true);
     } catch (e) {
       setErr(e.message || 'Cancel failed');
     } finally {
