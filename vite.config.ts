@@ -1,15 +1,30 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react-swc';
 import path from 'node:path';
-import viteCompression from 'vite-plugin-compression';
+import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 
 const buildStamp = String(Date.now());
 
 export default defineConfig({
   plugins: [
     react(),
-    viteCompression({ algorithm: 'gzip' }),
-    viteCompression({ algorithm: 'brotliCompress' }),
+    {
+      name: 'bust-chunk-imports',
+      closeBundle() {
+        const assetsDir = path.resolve(__dirname, 'dist/assets');
+        try {
+          for (const f of readdirSync(assetsDir)) {
+            if (!f.endsWith('.js')) continue;
+            const p = path.join(assetsDir, f);
+            const src = readFileSync(p, 'utf8');
+            const out = src
+              .replace(/from"\.\/([^"?]+\.js)"/g, `from"./$1?v=${buildStamp}"`)
+              .replace(/import"\.\/([^"?]+\.js)"/g, `import"./$1?v=${buildStamp}"`);
+            if (out !== src) writeFileSync(p, out);
+          }
+        } catch { /* ignore */ }
+      },
+    },
     {
       name: 'admin-asset-cache-bust',
       transformIndexHtml: {
@@ -35,10 +50,21 @@ export default defineConfig({
       },
       output: {
         manualChunks: (id) => {
-          if (id.includes('framer-motion')) return 'framer-motion';
-          if (id.includes('node_modules/react')) return 'react-vendor';
+          if (id.includes('framer-motion')) return 'framer-motion-v2';
+          if (id.includes('node_modules/react')) return 'react-vendor-v2';
         },
+        chunkFileNames: 'assets/[name]-[hash].js',
+        entryFileNames: 'assets/[name]-[hash].js',
+        assetFileNames: 'assets/[name]-[hash][extname]',
       },
+    },
+  },
+  experimental: {
+    renderBuiltUrl(filename, { hostType }) {
+      if (hostType === 'js' || hostType === 'css') {
+        return `/${filename}?v=${buildStamp}`;
+      }
+      return `/${filename}`;
     },
   },
   server: {

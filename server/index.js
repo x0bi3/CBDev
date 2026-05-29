@@ -93,7 +93,7 @@ if (existsSync(adminDist)) {
     express.static(adminDist, { index: false })(req, res, (err) => {
       if (err) return next(err);
       if (req.method !== 'GET') return next();
-      res.set('Cache-Control', 'no-cache');
+      res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
       res.sendFile(resolve(adminDist, 'index.html'));
     });
   });
@@ -108,6 +108,7 @@ if (existsSync(distDir)) {
     if (req.path.startsWith('/api')) return next();
     if (isAdminHost(req)) {
       if (existsSync(adminDist)) {
+        res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
         res.sendFile(resolve(adminDist, 'index.html'));
         return;
       }
