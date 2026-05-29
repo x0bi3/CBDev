@@ -85,8 +85,9 @@ function inputCls(extra = '') {
   return 'w-full rounded-lg border border-slate-500 bg-slate-800 px-3 py-2 text-sm text-slate-50 placeholder:text-slate-400 ' + extra;
 }
 
-function modalPanelCls() {
-  return 'max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-slate-500 bg-slate-800 p-6 text-slate-100 shadow-2xl';
+function modalPanelCls(wide = false) {
+  return 'max-h-[90vh] w-full overflow-y-auto rounded-2xl border border-slate-500 bg-slate-800 p-6 text-slate-100 shadow-2xl ' +
+    (wide ? 'max-w-2xl' : 'max-w-lg');
 }
 
 async function uploadProductImage(file) {
@@ -102,6 +103,98 @@ async function uploadProductImage(file) {
   try { data = await res.json(); } catch (_) {}
   if (!res.ok) throw new Error(data.error || 'Upload failed');
   return data.url;
+}
+
+function variantsToRows(variants) {
+  if (!variants || typeof variants !== 'object') return [];
+  return Object.entries(variants).map(([name, options]) => ({
+    name,
+    options: Array.isArray(options) ? options.map(String) : [],
+  }));
+}
+
+function rowsToVariants(rows) {
+  const out = {};
+  for (const row of rows || []) {
+    const name = String(row.name || '').trim();
+    if (!name) continue;
+    const opts = (row.options || []).map((o) => String(o).trim()).filter(Boolean);
+    if (opts.length) out[name] = opts;
+  }
+  return out;
+}
+
+function VariantsEditor({ rows, onChange }) {
+  const updateRow = (i, patch) => {
+    onChange(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+  };
+  const addRow = () => onChange([...rows, { name: '', options: [] }]);
+  const removeRow = (i) => onChange(rows.filter((_, j) => j !== i));
+
+  return (
+    <div className="overflow-hidden rounded-lg border border-slate-500">
+      <table className="w-full text-sm">
+        <thead className="bg-slate-900/90 text-left text-xs uppercase tracking-wide text-slate-300">
+          <tr>
+            <th className="px-3 py-2.5 font-medium">Option group</th>
+            <th className="px-3 py-2.5 font-medium">Choices</th>
+            <th className="w-12 px-2 py-2.5" aria-label="Remove" />
+          </tr>
+        </thead>
+        <tbody>
+          {rows.length === 0 ? (
+            <tr>
+              <td colSpan={3} className="px-3 py-5 text-center text-slate-400">
+                No size/color options — shoppers get one default choice.
+              </td>
+            </tr>
+          ) : rows.map((row, i) => (
+            <tr key={i} className="border-t border-slate-600 bg-slate-900/40">
+              <td className="px-3 py-2 align-top">
+                <input
+                  className={inputCls()}
+                  placeholder="Size"
+                  value={row.name}
+                  onChange={(e) => updateRow(i, { name: e.target.value })}
+                />
+              </td>
+              <td className="px-3 py-2 align-top">
+                <input
+                  className={inputCls()}
+                  placeholder="XS, S, M, L, XL"
+                  value={row.options.join(', ')}
+                  onChange={(e) => updateRow(i, {
+                    options: e.target.value.split(',').map((s) => s.trim()).filter(Boolean),
+                  })}
+                />
+                {row.options.length > 0 && (
+                  <div className="mt-1.5 flex flex-wrap gap-1">
+                    {row.options.map((opt, k) => (
+                      <span key={k} className="rounded-md bg-slate-700 px-2 py-0.5 text-xs text-slate-200">{opt}</span>
+                    ))}
+                  </div>
+                )}
+              </td>
+              <td className="px-2 py-2 align-top text-center">
+                <button
+                  type="button"
+                  onClick={() => removeRow(i)}
+                  className="rounded px-2 py-1 text-lg leading-none text-rose-400 hover:bg-rose-950 hover:text-rose-300"
+                  title="Remove group"
+                >
+                  ×
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className="flex items-center justify-between border-t border-slate-600 bg-slate-900/60 px-3 py-2">
+        <Btn variant="ghost" onClick={addRow}>+ Add option group</Btn>
+        <span className="text-xs text-slate-400">Comma-separated values</span>
+      </div>
+    </div>
+  );
 }
 
 function ProductImagesEditor({ images, onImagesChange }) {
@@ -160,31 +253,29 @@ function ProductsSection() {
     if (!row) {
       setEdit({
         name: '', category_slug: 'apparel', price_cents: 0, color: 'from-indigo-500 to-violet-700',
-        description: '', images: [], variantsJson: '{}', active: true, track_inventory: false, stock_quantity: 0, sku: '',
+        description: '', images: [], variantRows: [], active: true, track_inventory: false, stock_quantity: 0, sku: '',
       });
       return;
     }
     setEdit({
       ...row,
       images: Array.isArray(row.images) ? [...row.images] : [],
-      variantsJson: JSON.stringify(row.variants || {}, null, 2),
+      variantRows: variantsToRows(row.variants),
       stock_quantity: row.stock_quantity ?? 0,
       track_inventory: !!row.track_inventory,
     });
   };
 
   const save = async () => {
-    let variants = {};
-    try { variants = JSON.parse(edit.variantsJson || '{}'); } catch { alert('Variants must be valid JSON'); return; }
     const body = {
       ...edit,
       price_cents: Math.round(Number(edit.price_cents) || 0),
       images: edit.images || [],
-      variants,
+      variants: rowsToVariants(edit.variantRows),
       stock_quantity: Math.max(0, Number(edit.stock_quantity) || 0),
       track_inventory: !!edit.track_inventory,
     };
-    delete body.variantsJson;
+    delete body.variantRows;
     if (edit.id) await api('/admin/products/' + edit.id, { method: 'PUT', body });
     else await api('/admin/products', { method: 'POST', body });
     setEdit(null);
@@ -217,7 +308,7 @@ function ProductsSection() {
       />
       {edit && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4" onClick={() => setEdit(null)}>
-          <div className={modalPanelCls()} onClick={e => e.stopPropagation()}>
+          <div className={modalPanelCls(true)} onClick={e => e.stopPropagation()}>
             <h3 className="text-lg font-semibold text-white">{edit.id ? 'Edit' : 'New'} product</h3>
             <div className="mt-4 grid gap-3">
               <Field label="Name"><input className={inputCls()} value={edit.name || ''} onChange={e => setEdit({ ...edit, name: e.target.value })} /></Field>
@@ -243,7 +334,12 @@ function ProductsSection() {
                   </Field>
                 )}
               </div>
-              <Field label="Variants JSON (sizes, colors)"><textarea className={inputCls('font-mono text-xs')} rows={4} value={edit.variantsJson || '{}'} onChange={e => setEdit({ ...edit, variantsJson: e.target.value })} /></Field>
+              <Field label="Variants (sizes, colors, etc.)">
+                <VariantsEditor
+                  rows={edit.variantRows || []}
+                  onChange={(variantRows) => setEdit({ ...edit, variantRows })}
+                />
+              </Field>
               <label className="flex items-center gap-2 text-sm text-slate-200">
                 <input type="checkbox" checked={edit.active !== false} onChange={e => setEdit({ ...edit, active: e.target.checked })} />
                 Active (visible in Merch store)
