@@ -1,5 +1,5 @@
 import './admin.css';
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
 
 const TOKEN_KEY = 'cb-admin-token';
@@ -367,20 +367,45 @@ function BlogAgentsSection() {
   const [logs, setLogs] = useState([]);
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(null);
+  const logEndRef = useRef(null);
 
-  const load = useCallback(() => {
-    return api('/admin/blog-agents').then((r) => setAgents(r.agents)).catch((ex) => setErr(ex.message));
+  const loadHistory = useCallback(async (agentId) => {
+    if (!agentId) return;
+    const [r, l] = await Promise.all([
+      api('/admin/blog-agents/' + agentId + '/runs?limit=15'),
+      api('/admin/blog-agents/' + agentId + '/logs?limit=80'),
+    ]);
+    setRuns(r.runs);
+    setLogs(l.logs);
   }, []);
 
-  useEffect(() => { load(); }, [load]);
-
-  const anyLive = agents.some((a) => ['running', 'paused', 'queued'].includes(a.run_state));
+  const refresh = useCallback(async () => {
+    const r = await api('/admin/blog-agents');
+    setAgents(r.agents);
+    if (expanded) await loadHistory(expanded);
+    return r.agents;
+  }, [expanded, loadHistory]);
 
   useEffect(() => {
-    if (!anyLive) return;
-    const t = setInterval(load, 2000);
+    refresh().catch((ex) => setErr(ex.message));
+  }, [refresh]);
+
+  const anyLive = agents.some((a) => ['running', 'paused', 'queued'].includes(a.run_state));
+  const expandedLive = expanded != null && agents.some(
+    (a) => a.id === expanded && ['running', 'paused', 'queued'].includes(a.run_state),
+  );
+
+  useEffect(() => {
+    if (!anyLive && !expandedLive) return;
+    const t = setInterval(() => {
+      refresh().catch((ex) => setErr(ex.message));
+    }, 2000);
     return () => clearInterval(t);
-  }, [anyLive, load]);
+  }, [anyLive, expandedLive, refresh]);
+
+  useEffect(() => {
+    logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [logs]);
 
   const openHistory = async (agent) => {
     if (expanded === agent.id) {
@@ -388,28 +413,20 @@ function BlogAgentsSection() {
       return;
     }
     setExpanded(agent.id);
-    const [r, l] = await Promise.all([
-      api('/admin/blog-agents/' + agent.id + '/runs?limit=15'),
-      api('/admin/blog-agents/' + agent.id + '/logs?limit=80'),
-    ]);
-    setRuns(r.runs);
-    setLogs(l.logs);
+    try {
+      await loadHistory(agent.id);
+    } catch (ex) {
+      setErr(ex.message);
+    }
   };
 
   const act = async (agentId, action) => {
     setBusy(agentId + ':' + action);
     setErr('');
     try {
+      if (action === 'start') setExpanded(agentId);
       await api('/admin/blog-agents/' + agentId + '/' + action, { method: 'POST' });
-      await load();
-      if (expanded === agentId) {
-        const [r, l] = await Promise.all([
-          api('/admin/blog-agents/' + agentId + '/runs?limit=15'),
-          api('/admin/blog-agents/' + agentId + '/logs?limit=80'),
-        ]);
-        setRuns(r.runs);
-        setLogs(l.logs);
-      }
+      await refresh();
     } catch (ex) {
       setErr(ex.message);
     } finally {
@@ -429,7 +446,22 @@ function BlogAgentsSection() {
           config: JSON.parse(agent._configJson || '{}'),
         },
       });
-      await load();
+      await refresh();
+    } catch (ex) {
+      setErr(ex.message);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const deleteAgent = async (agent) => {
+    if (!confirm(`Delete "${agent.name}"? Run history will also be removed.`)) return;
+    setBusy('delete:' + agent.id);
+    setErr('');
+    try {
+      await api('/admin/blog-agents/' + agent.id, { method: 'DELETE' });
+      if (expanded === agent.id) setExpanded(null);
+      await refresh();
     } catch (ex) {
       setErr(ex.message);
     } finally {
@@ -508,6 +540,11 @@ function BlogAgentsSection() {
                   <Btn variant="ghost" onClick={() => openHistory(agent)}>
                     {expanded === agent.id ? 'Hide log' : 'History'}
                   </Btn>
+                  {!running && (
+                    <Btn variant="danger" onClick={() => deleteAgent(agent)} disabled={!!busy}>
+                      Delete
+                    </Btn>
+                  )}
                 </div>
               </div>
 
@@ -572,6 +609,7 @@ function BlogAgentsSection() {
                         </li>
                       ))}
                       {logs.length === 0 && <li className="text-slate-500">No log lines yet</li>}
+                      <li ref={logEndRef} aria-hidden="true" />
                     </ul>
                   </div>
                 </div>

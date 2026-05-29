@@ -172,4 +172,27 @@ router.post('/:id/stop', async (req, res) => {
   res.json({ ok: true, message: 'Stop requested' });
 });
 
+router.delete('/:id', async (req, res) => {
+  try {
+    const agentId = Number(req.params.id);
+    if (isAgentActive(agentId)) {
+      res.status(409).json({ error: 'Stop the agent before deleting it' });
+      return;
+    }
+
+    const { rows } = await query(
+      'DELETE FROM blog_agents WHERE id = $1 RETURNING id, slug, name',
+      [agentId],
+    );
+    if (!rows[0]) {
+      res.status(404).json({ error: 'Agent not found' });
+      return;
+    }
+    res.json({ ok: true, deleted: rows[0] });
+  } catch (err) {
+    console.error('blog-agents delete:', err);
+    res.status(500).json({ error: 'Failed to delete agent' });
+  }
+});
+
 export default router;
