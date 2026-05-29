@@ -43,7 +43,7 @@ const PORT = Number(process.env.PORT) || 3020;
 
 function isAdminHost(req) {
   const host = (req.headers.host || '').split(':')[0].toLowerCase();
-  return host === 'admin.creativebuilds.dev' || host.startsWith('admin.');
+  return host === 'creativeadmin.cyberopticsoftware.com';
 }
 
 app.use(express.json({ limit: '2mb' }));
