@@ -78,20 +78,24 @@ if (existsSync(adminDist)) {
     if (req.path.startsWith('/api')) return next();
 
     // Vite emits shared chunks under dist/assets/, not dist/admin/
-    const serveAdminSpa = () => {
-      express.static(adminDist, { index: false })(req, res, (err) => {
-        if (err) return next(err);
-        if (req.method !== 'GET') return next();
-        res.sendFile(resolve(adminDist, 'index.html'));
-      });
-    };
-
     if (req.path.startsWith('/assets/') && existsSync(distDir)) {
-      express.static(distDir, { index: false })(req, res, () => serveAdminSpa());
+      express.static(distDir, {
+        index: false,
+        maxAge: '1y',
+        immutable: true,
+      })(req, res, () => {
+        // Never SPA-fallback for missing assets — avoids text/html MIME on .js/.css
+        res.status(404).type('text/plain').send('Not found');
+      });
       return;
     }
 
-    serveAdminSpa();
+    express.static(adminDist, { index: false })(req, res, (err) => {
+      if (err) return next(err);
+      if (req.method !== 'GET') return next();
+      res.set('Cache-Control', 'no-cache');
+      res.sendFile(resolve(adminDist, 'index.html'));
+    });
   });
 }
 
