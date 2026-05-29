@@ -1,20 +1,36 @@
 /**
- * Monetization Blueprint — discovers Stripe billing updates, drafts MVP payment integration tutorials.
+ * Monetization Blueprint — discovers Stripe billing trends, drafts MVP payment integration tutorials.
  *
  * Config keys (admin JSON):
- *   allowed_tags  string[]  Stack whitelist (default: nextjs, nodejs, stripe, postgres, supabase)
- *   maxItems      number    Max discovery candidates (default: 5)
- *   autoPublish   boolean   Publish draft immediately (default: false)
- *   feedUrls      string[]  RSS/atom URLs to scan (default: Stripe blog feed)
+ *   allowed_tags     string[]  Stack whitelist
+ *   maxItems         number    Max ranked candidates (default: 5)
+ *   autoPublish      boolean   Publish draft immediately (default: false)
+ *   useSeedFallback  boolean   Use hardcoded seeds when live discovery empty (default: false)
+ *   feedUrls         string[]  RSS/atom URLs to scan
+ *   hnQueries        string[]  Hacker News search queries
  *
  * @param {import('../lib/blogAgentContext.js').ReturnType<typeof import('../lib/blogAgentContext.js').createAgentContext>} ctx
  */
 import { generateJSON } from '../lib/llm.js';
+import {
+  fetchRssFeed,
+  searchHackerNews,
+  searchGitHubRepos,
+  gatherCandidates,
+  filterSeenSources,
+  rankCandidates,
+  inferMonetizationPrimitive,
+  inferTechStackHints,
+  hashSlug,
+} from '../lib/agentDiscovery.js';
 
 const DEFAULT_TAGS = ['nextjs', 'nodejs', 'stripe', 'postgres', 'supabase'];
 const DEFAULT_FEEDS = [
   'https://stripe.com/blog/feed.rss',
+  'https://stripe.com/docs/changelog.rss',
 ];
+const DEFAULT_HN_QUERIES = ['Stripe billing', 'Stripe webhooks', 'micro SaaS payments'];
+
 const SEED_CANDIDATES = [
   {
     id: 'seed-stripe-subs',
@@ -25,6 +41,7 @@ const SEED_CANDIDATES = [
     monetizationPrimitive: 'multi-tier subscriptions',
     databaseEngine: 'postgres',
     techStack: ['nextjs', 'stripe', 'postgres'],
+    score: 100,
   },
   {
     id: 'seed-stripe-webhooks',
@@ -35,6 +52,7 @@ const SEED_CANDIDATES = [
     monetizationPrimitive: 'invoice webhooks',
     databaseEngine: 'supabase',
     techStack: ['nodejs', 'stripe', 'supabase'],
+    score: 100,
   },
 ];
 
@@ -42,8 +60,9 @@ export default async function run(ctx) {
   const allowedTags = ctx.config.allowed_tags || DEFAULT_TAGS;
   const maxItems = Number(ctx.config.maxItems) || 5;
 
-  await ctx.step('discover', 'Scanning Stripe changelog and billing documentation feeds…');
-  const externalData = await fetchExternalTriggers(ctx, maxItems);
+  await ctx.step('discover', 'Scanning Stripe feeds, Hacker News, and GitHub for billing trends…');
+  const seenIds = await ctx.getRecentSourceIds(30);
+  const externalData = await fetchExternalTriggers(ctx, maxItems, allowedTags, seenIds);
   await ctx.checkpoint();
 
   if (!externalData || externalData.length === 0) {
@@ -52,8 +71,8 @@ export default async function run(ctx) {
   }
 
   await ctx.step('analyze', 'Selecting monetization primitive for small-business MVP…');
-  await ctx.log('Calling OpenAI to analyze Stripe billing candidates…', 'info', 'analyze');
-  const validationResult = await analyzeCandidates(externalData, allowedTags);
+  await ctx.log(`Calling OpenAI to analyze ${externalData.length} Stripe billing candidates…`, 'info', 'analyze');
+  const validationResult = await analyzeCandidates(externalData, allowedTags, seenIds);
   await ctx.checkpoint();
 
   if (!validationResult.isValid) {
@@ -67,9 +86,11 @@ export default async function run(ctx) {
   const builtContent = await draftStructuredPost(validationResult.targetData, allowedTags);
   await ctx.checkpoint();
 
+  validateBodyBlocks(builtContent.bodyBlocks);
+
   const post = await ctx.saveDraft({
     title: builtContent.title,
-    slug: builtContent.slug || '',
+    slug: builtContent.slug || `${hashSlug(builtContent.title)}-${hashSlug(validationResult.targetData.id)}`.slice(0, 80),
     excerpt: builtContent.excerpt,
     body: builtContent.bodyBlocks,
     read_time: builtContent.readTime || '8 min',
@@ -85,102 +106,97 @@ export default async function run(ctx) {
   return { postId: post.id, slug: post.slug, source: validationResult.targetData.id };
 }
 
-async function fetchExternalTriggers(ctx, limit) {
+async function fetchExternalTriggers(ctx, limit, allowedTags, seenIds) {
   const feedUrls = ctx.config.feedUrls || DEFAULT_FEEDS;
-  const candidates = [];
+  const hnQueries = ctx.config.hnQueries || DEFAULT_HN_QUERIES;
+  const githubToken = process.env.GITHUB_TOKEN || '';
+  const since = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+  const fetchers = [];
 
   for (const feedUrl of feedUrls) {
-    try {
-      const res = await fetchWithTimeout(feedUrl, {
-        headers: { Accept: 'application/rss+xml, application/xml, text/xml', 'User-Agent': 'CreativeBuildsBlogAgent/1.0' },
-      }, 12000);
-
-      if (!res.ok) {
-        await ctx.log(`Feed ${feedUrl} returned ${res.status}`, 'warn', 'discover');
-        continue;
-      }
-
-      const xml = await res.text();
-      const items = parseRssItems(xml, 5);
-
-      for (const item of items) {
-        candidates.push({
-          id: `stripe-${hashSlug(item.title)}`,
-          title: item.title,
-          source: feedUrl.includes('stripe.com') ? 'stripe/blog' : 'rss',
-          url: item.link,
-          snippet: item.description.slice(0, 400),
-          publishedAt: item.pubDate,
+    fetchers.push(async () => {
+      try {
+        const items = await fetchRssFeed(feedUrl, 8);
+        return items.map((item) => {
+          const text = `${item.title} ${item.description}`;
+          return {
+            id: `stripe-${hashSlug(item.title)}`,
+            title: item.title,
+            source: feedUrl.includes('changelog') ? 'stripe/changelog' : 'stripe/blog',
+            url: item.link,
+            snippet: item.description.slice(0, 400),
+            publishedAt: item.pubDate || null,
+            discoveredAt: new Date().toISOString(),
+            upvotes: 15,
+            engagement: { upvotes: 15 },
+            monetizationPrimitive: inferMonetizationPrimitive(text),
+            techStackHints: inferTechStackHints(text, allowedTags),
+            rawText: text.toLowerCase(),
+          };
         });
+      } catch (err) {
+        await ctx.log(`Feed ${feedUrl} failed: ${err.message}`, 'warn', 'discover');
+        return [];
       }
+    });
+  }
+
+  for (const query of hnQueries) {
+    fetchers.push(async () => {
+      try {
+        const hits = await searchHackerNews(query, 8);
+        return hits.map((h) => ({
+          ...h,
+          monetizationPrimitive: inferMonetizationPrimitive(`${h.title} ${h.snippet}`),
+          techStackHints: inferTechStackHints(`${h.title} ${h.snippet}`, allowedTags),
+        }));
+      } catch (err) {
+        await ctx.log(`HN search "${query}" failed: ${err.message}`, 'warn', 'discover');
+        return [];
+      }
+    });
+  }
+
+  fetchers.push(async () => {
+    try {
+      const repos = await searchGitHubRepos(
+        `"stripe subscription" pushed:>${since} stars:>50`,
+        { token: githubToken, limit: 8, sort: 'updated' },
+      );
+      return repos.map((r) => ({
+        ...r,
+        monetizationPrimitive: inferMonetizationPrimitive(`${r.title} ${r.snippet}`),
+        techStackHints: inferTechStackHints(`${r.title} ${r.snippet}`, allowedTags),
+      }));
     } catch (err) {
-      await ctx.log(`Feed ${feedUrl} fetch failed: ${err.message}`, 'warn', 'discover');
+      await ctx.log(`GitHub Stripe repo search failed: ${err.message}`, 'warn', 'discover');
+      return [];
     }
-  }
+  });
 
-  if (candidates.length === 0) {
-    await ctx.log('Live Stripe feeds empty — using seed candidates', 'warn', 'discover');
-    return SEED_CANDIDATES.slice(0, limit);
-  }
+  const raw = await gatherCandidates(fetchers);
+  const ranked = rankCandidates(raw, limit * 2);
+  const unseen = filterSeenSources(ranked, seenIds);
+  const final = unseen.slice(0, limit);
 
-  return candidates.slice(0, limit);
-}
+  await ctx.log(
+    `Discovered ${raw.length} billing candidates, ranked top ${ranked.length}, skipping ${ranked.length - unseen.length} seen sources`,
+    'info',
+    'discover',
+  );
 
-function parseRssItems(xml, maxItems) {
-  const items = [];
-  const itemBlocks = xml.match(/<item>[\s\S]*?<\/item>/g) || xml.match(/<entry>[\s\S]*?<\/entry>/g) || [];
-
-  for (const block of itemBlocks.slice(0, maxItems)) {
-    const title = extractTag(block, 'title');
-    const link = extractTag(block, 'link') || extractAttr(block, 'link', 'href');
-    const description = extractTag(block, 'description') || extractTag(block, 'summary') || extractTag(block, 'content') || '';
-    const pubDate = extractTag(block, 'pubDate') || extractTag(block, 'published') || '';
-
-    if (title) {
-      items.push({
-        title: decodeXml(stripCdata(title)),
-        link: stripCdata(link),
-        description: stripHtml(decodeXml(stripCdata(description))),
-        pubDate,
-      });
+  if (final.length === 0) {
+    if (ctx.config.useSeedFallback === true) {
+      await ctx.log('Live Stripe feeds empty — using seed candidates (useSeedFallback enabled)', 'warn', 'discover');
+      return SEED_CANDIDATES.slice(0, limit);
     }
+    return [];
   }
 
-  return items;
+  return final;
 }
 
-function stripCdata(str) {
-  return str.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1').trim();
-}
-
-function extractTag(block, tag) {
-  const m = block.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`));
-  return m ? m[1].trim() : '';
-}
-
-function extractAttr(block, tag, attr) {
-  const m = block.match(new RegExp(`<${tag}[^>]*${attr}="([^"]+)"`));
-  return m ? m[1] : '';
-}
-
-function decodeXml(str) {
-  return str
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'");
-}
-
-function stripHtml(str) {
-  return str.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-}
-
-function hashSlug(text) {
-  return String(text).toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40);
-}
-
-async function analyzeCandidates(data, allowedTags) {
+async function analyzeCandidates(data, allowedTags, seenIds) {
   const schemaHint = `{
   "isValid": boolean,
   "reason": "string if rejected",
@@ -198,9 +214,11 @@ async function analyzeCandidates(data, allowedTags) {
   const result = await generateJSON({
     system: `You are a micro-SaaS monetization architect. Pick ONE Stripe billing pattern suitable for a small business MVP launchable in 48 hours.
 Primitives: usage-based billing, multi-tier subscriptions, automated invoice webhooks, customer portal, checkout sessions.
+Do NOT pick candidates whose id is in this already-covered list: ${seenIds.join(', ') || 'none'}.
 Only use tags from: ${allowedTags.join(', ')}.
-Reject patterns requiring enterprise Stripe Connect marketplace splits or complex tax nexus automation.`,
-    user: `Stripe/billing candidates:\n${JSON.stringify(data, null, 2)}`,
+Reject patterns requiring enterprise Stripe Connect marketplace splits or complex tax nexus automation.
+Prefer candidates with higher score and recent publishedAt.`,
+    user: `Top ranked Stripe/billing candidates (each may include monetizationPrimitive and techStackHints):\n${JSON.stringify(data, null, 2)}`,
     schemaHint,
     temperature: 0.2,
   });
@@ -216,6 +234,10 @@ Reject patterns requiring enterprise Stripe Connect marketplace splits or comple
       isValid: false,
       reason: `Tech stack ${outOfScope.join(', ')} outside allowed_tags scope`,
     };
+  }
+
+  if (seenIds.includes(String(result.targetData?.id))) {
+    return { isValid: false, reason: 'Source already covered in prior run' };
   }
 
   return { isValid: true, targetData: result.targetData };
@@ -238,6 +260,7 @@ async function draftStructuredPost(targetData, allowedTags) {
 Voice: builder-first ("We wire Stripe checkout in production like this...").
 Rules:
 - NO fluff or dictionary definitions.
+- First body block MUST include an outbound link to the source URL for E-E-A-T.
 - H2/H3 sections answer the question in the first two sentences.
 - Include real code: Stripe Checkout session creation, webhook signature verification, and paywall middleware.
 - Use only: ${allowedTags.join(', ')}.
@@ -251,7 +274,7 @@ MVP scope: ${targetData.mvpScope || 'Checkout + webhook + paywalled dashboard'}
 Source inspiration: ${targetData.sourceTitle} — ${targetData.sourceUrl}
 
 Body structure (each as separate bodyBlocks string):
-1. Overview — why ${targetData.monetizationPrimitive} is the right MVP billing model
+1. Overview with outbound link to source — why ${targetData.monetizationPrimitive} is the right MVP billing model
 2. ## Step-by-Step Payment Flows (Stripe Checkout + ${db} customer record)
 3. Code: create checkout session endpoint
 4. ## Handling Webhooks Without Dropping Requests (idempotency + signature verify)
@@ -272,12 +295,8 @@ Body structure (each as separate bodyBlocks string):
   };
 }
 
-async function fetchWithTimeout(url, options = {}, ms = 10000) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), ms);
-  try {
-    return await fetch(url, { ...options, signal: controller.signal });
-  } finally {
-    clearTimeout(timer);
+function validateBodyBlocks(bodyBlocks) {
+  if (!Array.isArray(bodyBlocks) || bodyBlocks.length === 0 || !bodyBlocks.some((b) => String(b).trim())) {
+    throw new Error('LLM returned empty or invalid bodyBlocks array');
   }
 }

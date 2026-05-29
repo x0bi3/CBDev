@@ -211,6 +211,16 @@ function DeviceProvider({ children }) {
     loadScreenApps();
   }, [loadScreenApps, auth?.id]);
 
+  useEffect(() => {
+    apiCached('/products', { auth: false }, API_CACHE_TTL.catalog).catch(() => {});
+    apiCached('/products/categories', { auth: false }, API_CACHE_TTL.catalog).catch(() => {});
+    apiCached('/blog', { auth: false }, API_CACHE_TTL.blog).catch(() => {});
+    apiCached('/portfolio', { auth: false }, API_CACHE_TTL.catalog).catch(() => {});
+    if (auth?.id) {
+      apiCached('/calendar/types', {}, API_CACHE_TTL.calendarTypes, auth.id).catch(() => {});
+    }
+  }, [auth?.id]);
+
   // --- Music engine: src+play side-effect runs when station changes ---
   useEffect(() => {
     const a = audioRef.current;

@@ -9,7 +9,7 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export function createAgentContext({ agent, runId, handle, onStep, onLog, saveDraft, publishPost }) {
+export function createAgentContext({ agent, runId, handle, onStep, onLog, saveDraft, publishPost, getRecentSourceIds }) {
   const config = agent.config && typeof agent.config === 'object' ? agent.config : {};
 
   async function waitWhilePaused() {
@@ -52,6 +52,11 @@ export function createAgentContext({ agent, runId, handle, onStep, onLog, saveDr
       const post = await publishPost(postId);
       await onLog('info', 'publish', `Published: ${post.slug}`);
       return post;
+    },
+
+    /** Source IDs from prior successful runs — for deduplication in discovery */
+    async getRecentSourceIds(limit = 30) {
+      return getRecentSourceIds(agent.id, limit);
     },
 
     /** Demo helper — remove or ignore in production scripts */

@@ -54,6 +54,19 @@ Between long operations (API calls, LLM, transcoding), call **`await ctx.checkpo
 | `ctx.publishPost(postId)` | Set post to `published` with `published_at` |
 | `ctx.config` | JSON from admin **Config** field (per-agent settings) |
 | `ctx.agentSlug`, `ctx.runId` | Correlation / logging |
+| `ctx.getRecentSourceIds(limit?)` | Source IDs from prior completed runs — use for deduplication |
+
+### Discovery layer
+
+Shared helpers live in [`server/lib/agentDiscovery.js`](../lib/agentDiscovery.js):
+
+- `fetchRedditPosts`, `searchHackerNews`, `fetchRssFeed`, `searchGitHubRepos`, `fetchGitHubReleases`
+- `discoverSelfHostedRepos`, `parseAwesomeSelfHostedRepos`
+- `scoreCandidate`, `rankCandidates`, `filterSeenSources`, `gatherCandidates`
+
+Agents should call `ctx.getRecentSourceIds()` during discover, pass top-ranked candidates (not raw dumps) to analyze, and return `{ source: targetData.id }` so repeat topics are skipped.
+
+**Production config:** keep `useSeedFallback: false` so agents exit cleanly when live feeds are empty instead of regenerating stale seed content.
 
 ### `saveDraft` / `publishPost` fields
 
@@ -90,7 +103,14 @@ Stop: runner throws `AgentStoppedError` when admin hits Stop — do not catch an
 Put tunables in **Config JSON**, not hardcoded secrets:
 
 ```json
-{ "maxRepos": 5, "minStars": 1000, "publishMode": "draft" }
+{
+  "maxRepos": 5,
+  "minStars": 1000,
+  "autoPublish": false,
+  "useSeedFallback": false,
+  "minScore": 5,
+  "publishMode": "draft"
+}
 ```
 
 Read with `ctx.config.maxRepos`. API keys belong in server `.env`, read inside the agent via `process.env.GITHUB_TOKEN`.
@@ -185,7 +205,10 @@ Keep **I/O and business logic** in plain functions; use `ctx` only for status + 
 
 ## Reference implementations
 
-- `github-sniper.js` — discover → SEO → outline → draft
-- `youtube-guru.js` — discover → select → transcribe → format → draft
+- `github-sniper.js` — discover → SEO → outline → draft (demo stub)
+- `youtube-guru.js` — discover → select → transcribe → format → draft (demo stub)
+- `saas-bill-hunter.js` — Reddit/HN/IH discovery → analyze → draft
+- `self-hosted-champion.js` — GitHub releases + trending OSS → analyze → draft
+- `monetization-blueprint.js` — Stripe feeds + HN + GitHub → analyze → draft
 
 Replace `ctx.demoDelay()` with real work; remove demo delays in production agents.

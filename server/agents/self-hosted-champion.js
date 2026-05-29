@@ -1,25 +1,38 @@
 /**
- * Self-Hosted Champion — discovers OSS releases, drafts VPS deployment highlight posts.
+ * Self-Hosted Champion — discovers trending OSS releases, drafts VPS deployment highlight posts.
  *
  * Config keys (admin JSON):
- *   allowed_tags  string[]  Deployment stack whitelist (default: docker, nodejs, postgres, coolify, caprover)
- *   maxItems      number    Max discovery candidates (default: 5)
- *   autoPublish   boolean   Publish draft immediately (default: false)
- *   repos         string[]  GitHub owner/repo pairs to watch (default: awesome-selfhosted/awesome-selfhosted, pocketbase/pocketbase, coolifyio/coolify, caprover/caprover)
+ *   allowed_tags     string[]  Deployment stack whitelist
+ *   maxItems         number    Max ranked candidates (default: 5)
+ *   autoPublish      boolean   Publish draft immediately (default: false)
+ *   useSeedFallback  boolean   Use hardcoded seeds when live discovery empty (default: false)
+ *   repos            string[]  GitHub owner/repo pairs to watch for releases
  *
  * @param {import('../lib/blogAgentContext.js').ReturnType<typeof import('../lib/blogAgentContext.js').createAgentContext>} ctx
  */
 import { generateJSON } from '../lib/llm.js';
+import {
+  fetchGitHubReleases,
+  discoverSelfHostedRepos,
+  parseAwesomeSelfHostedRepos,
+  gatherCandidates,
+  filterSeenSources,
+  rankCandidates,
+  scoreCandidate,
+  hashSlug,
+} from '../lib/agentDiscovery.js';
 
 const DEFAULT_TAGS = ['docker', 'nodejs', 'postgres', 'coolify', 'caprover', 'nginx'];
 const DEFAULT_REPOS = [
-  'awesome-selfhosted/awesome-selfhosted',
   'pocketbase/pocketbase',
   'coolifyio/coolify',
   'caprover/caprover',
   'umami-software/umami',
   'n8n-io/n8n',
+  'plausible/analytics',
+  'appwrite/appwrite',
 ];
+
 const SEED_CANDIDATES = [
   {
     id: 'seed-pocketbase',
@@ -30,6 +43,7 @@ const SEED_CANDIDATES = [
     ossName: 'PocketBase',
     commercialCompetitor: 'Firebase',
     techStack: ['docker', 'nodejs'],
+    score: 100,
   },
   {
     id: 'seed-umami',
@@ -40,6 +54,7 @@ const SEED_CANDIDATES = [
     ossName: 'Umami',
     commercialCompetitor: 'Google Analytics 360',
     techStack: ['docker', 'postgres'],
+    score: 100,
   },
 ];
 
@@ -47,8 +62,9 @@ export default async function run(ctx) {
   const allowedTags = ctx.config.allowed_tags || DEFAULT_TAGS;
   const maxItems = Number(ctx.config.maxItems) || 5;
 
-  await ctx.step('discover', 'Scanning GitHub release feeds for self-hosted software updates…');
-  const externalData = await fetchExternalTriggers(ctx, maxItems);
+  await ctx.step('discover', 'Scanning GitHub releases and trending self-hosted repos…');
+  const seenIds = await ctx.getRecentSourceIds(30);
+  const externalData = await fetchExternalTriggers(ctx, maxItems, seenIds);
   await ctx.checkpoint();
 
   if (!externalData || externalData.length === 0) {
@@ -57,8 +73,8 @@ export default async function run(ctx) {
   }
 
   await ctx.step('analyze', 'Mapping open-source tools to commercial alternatives…');
-  await ctx.log('Calling OpenAI to analyze self-hosted release candidates…', 'info', 'analyze');
-  const validationResult = await analyzeCandidates(externalData, allowedTags);
+  await ctx.log(`Calling OpenAI to analyze ${externalData.length} self-hosted candidates…`, 'info', 'analyze');
+  const validationResult = await analyzeCandidates(externalData, allowedTags, seenIds);
   await ctx.checkpoint();
 
   if (!validationResult.isValid) {
@@ -72,9 +88,11 @@ export default async function run(ctx) {
   const builtContent = await draftStructuredPost(validationResult.targetData, allowedTags);
   await ctx.checkpoint();
 
+  validateBodyBlocks(builtContent.bodyBlocks);
+
   const post = await ctx.saveDraft({
     title: builtContent.title,
-    slug: builtContent.slug || '',
+    slug: builtContent.slug || `${hashSlug(builtContent.title)}-${hashSlug(validationResult.targetData.id)}`.slice(0, 80),
     excerpt: builtContent.excerpt,
     body: builtContent.bodyBlocks,
     read_time: builtContent.readTime || '7 min',
@@ -90,97 +108,85 @@ export default async function run(ctx) {
   return { postId: post.id, slug: post.slug, source: validationResult.targetData.id };
 }
 
-async function fetchExternalTriggers(ctx, limit) {
+async function fetchExternalTriggers(ctx, limit, seenIds) {
   const repos = ctx.config.repos || DEFAULT_REPOS;
-  const candidates = [];
+  const githubToken = process.env.GITHUB_TOKEN || '';
+  const fetchers = [];
 
   for (const repo of repos) {
+    fetchers.push(async () => {
+      try {
+        const releases = await fetchGitHubReleases(repo, 3);
+        return releases.map((r) => ({
+          ...r,
+          type: 'release',
+          upvotes: scoreCandidate(r, { recencyHalfLifeDays: 3 }),
+        }));
+      } catch (err) {
+        await ctx.log(`GitHub ${repo} releases failed: ${err.message}`, 'warn', 'discover');
+        return [];
+      }
+    });
+  }
+
+  fetchers.push(async () => {
     try {
-      const url = `https://github.com/${repo}/releases.atom`;
-      const res = await fetchWithTimeout(url, {
-        headers: { Accept: 'application/atom+xml', 'User-Agent': 'CreativeBuildsBlogAgent/1.0' },
-      }, 12000);
-
-      if (!res.ok) {
-        await ctx.log(`GitHub ${repo} atom feed returned ${res.status}`, 'warn', 'discover');
-        continue;
-      }
-
-      const xml = await res.text();
-      const entries = parseAtomEntries(xml, 3);
-
-      for (const entry of entries) {
-        candidates.push({
-          id: `github-${repo.replace('/', '-')}-${entry.id}`,
-          title: entry.title,
-          source: `github/${repo}`,
-          url: entry.link,
-          snippet: entry.summary.slice(0, 400),
-          publishedAt: entry.updated,
-        });
-      }
+      const trending = await discoverSelfHostedRepos({ token: githubToken, limit: 10, daysBack: 30 });
+      return trending.map((r) => ({
+        ...r,
+        type: 'trending',
+        title: `${r.title} — trending self-hosted`,
+      }));
     } catch (err) {
-      await ctx.log(`GitHub ${repo} fetch failed: ${err.message}`, 'warn', 'discover');
+      await ctx.log(`GitHub self-hosted search failed: ${err.message}`, 'warn', 'discover');
+      return [];
     }
-  }
+  });
 
-  if (candidates.length === 0) {
-    await ctx.log('Live GitHub feeds empty — using seed candidates', 'warn', 'discover');
-    return SEED_CANDIDATES.slice(0, limit);
-  }
-
-  return candidates.slice(0, limit);
-}
-
-function parseAtomEntries(xml, maxEntries) {
-  const entries = [];
-  const entryBlocks = xml.match(/<entry>[\s\S]*?<\/entry>/g) || [];
-
-  for (const block of entryBlocks.slice(0, maxEntries)) {
-    const title = extractTag(block, 'title');
-    const link = extractTag(block, 'link') || extractAttr(block, 'link', 'href');
-    const summary = extractTag(block, 'summary') || extractTag(block, 'content') || '';
-    const updated = extractTag(block, 'updated') || extractTag(block, 'published') || '';
-    const id = extractTag(block, 'id') || title;
-
-    if (title) {
-      entries.push({
-        id: id.replace(/[^a-z0-9-]/gi, '-').slice(0, 80),
-        title: decodeXml(title),
-        link: link || '',
-        summary: stripHtml(decodeXml(summary)),
-        updated,
-      });
+  fetchers.push(async () => {
+    try {
+      const awesome = await parseAwesomeSelfHostedRepos(10);
+      return awesome.map((r) => ({
+        id: `awesome-${r.fullName.replace('/', '-')}`,
+        title: `${r.name} (${r.fullName})`,
+        source: `awesome-selfhosted/${r.fullName}`,
+        url: `https://github.com/${r.fullName}`,
+        snippet: `Curated self-hosted alternative: ${r.name}`,
+        type: 'awesome-list',
+        upvotes: 20,
+        publishedAt: new Date().toISOString(),
+        discoveredAt: new Date().toISOString(),
+        engagement: { stars: 20 },
+      }));
+    } catch (err) {
+      await ctx.log(`awesome-selfhosted parse failed: ${err.message}`, 'warn', 'discover');
+      return [];
     }
+  });
+
+  const raw = await gatherCandidates(fetchers);
+  const ranked = rankCandidates(raw, limit * 2);
+  const unseen = filterSeenSources(ranked, seenIds);
+  const final = unseen.slice(0, limit);
+
+  await ctx.log(
+    `Discovered ${raw.length} OSS candidates, ranked top ${ranked.length}, skipping ${ranked.length - unseen.length} seen sources`,
+    'info',
+    'discover',
+  );
+
+  if (final.length === 0) {
+    if (ctx.config.useSeedFallback === true) {
+      await ctx.log('Live GitHub feeds empty — using seed candidates (useSeedFallback enabled)', 'warn', 'discover');
+      return SEED_CANDIDATES.slice(0, limit);
+    }
+    return [];
   }
 
-  return entries;
+  return final;
 }
 
-function extractTag(block, tag) {
-  const m = block.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`));
-  return m ? m[1].trim() : '';
-}
-
-function extractAttr(block, tag, attr) {
-  const m = block.match(new RegExp(`<${tag}[^>]*${attr}="([^"]+)"`));
-  return m ? m[1] : '';
-}
-
-function decodeXml(str) {
-  return str
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'");
-}
-
-function stripHtml(str) {
-  return str.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-}
-
-async function analyzeCandidates(data, allowedTags) {
+async function analyzeCandidates(data, allowedTags, seenIds) {
   const schemaHint = `{
   "isValid": boolean,
   "reason": "string if rejected",
@@ -199,15 +205,21 @@ async function analyzeCandidates(data, allowedTags) {
   const result = await generateJSON({
     system: `You are an open-source infrastructure analyst for a VPS deployment agency.
 Pick ONE self-hosted tool that replaces a commercial SaaS (e.g. PocketBase=Firebase, Umami=Google Analytics, n8n=Zapier).
+commercialCompetitor MUST be a named commercial product — reject if you cannot identify one.
+Do NOT pick candidates whose id is in this already-covered list: ${seenIds.join(', ') || 'none'}.
 Only use deployment tags from: ${allowedTags.join(', ')}.
 Reject tools requiring Kubernetes clusters or dedicated GPU hardware.`,
-    user: `Release candidates:\n${JSON.stringify(data, null, 2)}`,
+    user: `Top ranked release/trending candidates:\n${JSON.stringify(data, null, 2)}`,
     schemaHint,
     temperature: 0.2,
   });
 
   if (!result.isValid) {
     return { isValid: false, reason: result.reason || 'No viable candidate' };
+  }
+
+  if (!result.targetData?.commercialCompetitor) {
+    return { isValid: false, reason: 'No identifiable commercial competitor' };
   }
 
   const stack = result.targetData?.techStack || [];
@@ -217,6 +229,10 @@ Reject tools requiring Kubernetes clusters or dedicated GPU hardware.`,
       isValid: false,
       reason: `Deployment stack ${outOfScope.join(', ')} outside allowed_tags scope`,
     };
+  }
+
+  if (seenIds.includes(String(result.targetData?.id))) {
+    return { isValid: false, reason: 'Source already covered in prior run' };
   }
 
   return { isValid: true, targetData: result.targetData };
@@ -238,6 +254,7 @@ async function draftStructuredPost(targetData, allowedTags) {
 Voice: builder-first ("We deploy...", "In our client environments...").
 Rules:
 - NO generic marketing fluff.
+- First body block MUST include an outbound link to the source URL for E-E-A-T.
 - H2/H3 sections answer the question in the first two sentences.
 - Include a deployment blueprint: docker-compose.yml or Coolify/CapRover setup steps as code blocks.
 - Mention data privacy and data sovereignty advantages.
@@ -251,7 +268,7 @@ Deployment tool: ${deployTool}
 Source: ${targetData.sourceTitle} — ${targetData.sourceUrl}
 
 Body structure (each as separate bodyBlocks string):
-1. Introduction to ${targetData.ossName} as the open-source hero
+1. Introduction to ${targetData.ossName} with outbound link to source
 2. ## Why Performance Beats ${targetData.commercialCompetitor} Cloud Configurations
 3. ## Deployment Blueprint on a Standard VPS (${deployTool})
 4. Include docker-compose or CapRover one-click deploy commands
@@ -270,12 +287,8 @@ Body structure (each as separate bodyBlocks string):
   };
 }
 
-async function fetchWithTimeout(url, options = {}, ms = 10000) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), ms);
-  try {
-    return await fetch(url, { ...options, signal: controller.signal });
-  } finally {
-    clearTimeout(timer);
+function validateBodyBlocks(bodyBlocks) {
+  if (!Array.isArray(bodyBlocks) || bodyBlocks.length === 0 || !bodyBlocks.some((b) => String(b).trim())) {
+    throw new Error('LLM returned empty or invalid bodyBlocks array');
   }
 }

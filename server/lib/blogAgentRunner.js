@@ -135,6 +135,19 @@ async function runAgentJob(agent, runId, handle) {
       );
       return rows[0];
     },
+    getRecentSourceIds: async (agentIdForQuery, limit = 30) => {
+      const { rows } = await query(
+        `SELECT result->>'source' AS source
+         FROM blog_agent_runs
+         WHERE agent_id = $1
+           AND status = 'completed'
+           AND result->>'source' IS NOT NULL
+         ORDER BY finished_at DESC NULLS LAST
+         LIMIT $2`,
+        [agentIdForQuery, limit],
+      );
+      return rows.map((r) => r.source).filter(Boolean);
+    },
   });
 
   let finalStatus = 'completed';

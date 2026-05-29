@@ -1,22 +1,42 @@
 /**
- * SaaS Bill Hunter — discovers SaaS pricing pain on Reddit, drafts custom-VPS alternative posts.
+ * SaaS Bill Hunter — discovers SaaS pricing pain on Reddit/HN/IH, drafts custom-VPS alternative posts.
  *
  * Config keys (admin JSON):
- *   allowed_tags  string[]  Tech stack whitelist (default: react, nextjs, nodejs, tailwind, supabase, postgres, stripe)
- *   maxItems      number    Max discovery candidates (default: 5)
- *   autoPublish   boolean   Publish draft immediately (default: false)
- *   subreddits    string[]  Reddit subs to scan (default: saas, sideproject, smallbusiness)
+ *   allowed_tags     string[]  Tech stack whitelist
+ *   maxItems         number    Max ranked candidates passed to analyze (default: 5)
+ *   autoPublish      boolean   Publish draft immediately (default: false)
+ *   useSeedFallback  boolean   Use hardcoded seeds when live discovery empty (default: false)
+ *   minScore         number    Minimum engagement score (default: 5)
+ *   subreddits       string[]  Reddit subs to scan
+ *   redditSorts      string[]  Reddit sorts: hot, top, new (default: hot, top, new)
+ *   hnQueries        string[]  Hacker News Algolia search queries
+ *   painKeywords     string[]  Optional keyword filter override
  *
  * @param {import('../lib/blogAgentContext.js').ReturnType<typeof import('../lib/blogAgentContext.js').createAgentContext>} ctx
  */
 import { generateJSON } from '../lib/llm.js';
+import {
+  fetchRedditPosts,
+  searchHackerNews,
+  fetchRssFeed,
+  gatherCandidates,
+  filterByKeywords,
+  filterSeenSources,
+  rankCandidates,
+  expandKeywordsFromTitles,
+  hashSlug,
+} from '../lib/agentDiscovery.js';
 
 const DEFAULT_TAGS = ['react', 'nextjs', 'nodejs', 'tailwind', 'supabase', 'postgres', 'stripe'];
-const PAIN_KEYWORDS = [
+const BASE_PAIN_KEYWORDS = [
   'expensive', 'pricing', 'alternative', 'overpay', 'bill', 'cost', 'subscription',
   'zapier', 'hubspot', 'vercel', 'notion', 'airtable', 'slack', 'salesforce',
-  'monthly fee', 'seat tax', 'too much',
+  'monthly fee', 'seat tax', 'too much', 'saas',
 ];
+const DEFAULT_SUBREDDITS = ['saas', 'sideproject', 'smallbusiness', 'entrepreneur', 'startups'];
+const DEFAULT_HN_QUERIES = ['SaaS pricing expensive', 'Zapier alternative', 'HubSpot pricing'];
+const INDIE_HACKERS_FEED = 'https://www.indiehackers.com/feed.xml';
+
 const SEED_CANDIDATES = [
   {
     id: 'seed-zapier',
@@ -27,6 +47,7 @@ const SEED_CANDIDATES = [
     saasName: 'Zapier',
     monthlyCost: 240,
     techStack: ['nodejs', 'postgres'],
+    score: 100,
   },
   {
     id: 'seed-hubspot',
@@ -37,15 +58,18 @@ const SEED_CANDIDATES = [
     saasName: 'HubSpot',
     monthlyCost: 800,
     techStack: ['nextjs', 'postgres', 'stripe'],
+    score: 100,
   },
 ];
 
 export default async function run(ctx) {
   const allowedTags = ctx.config.allowed_tags || DEFAULT_TAGS;
   const maxItems = Number(ctx.config.maxItems) || 5;
+  const minScore = Number(ctx.config.minScore) || 5;
 
-  await ctx.step('discover', 'Scanning Reddit for SaaS pricing pain points…');
-  const externalData = await fetchExternalTriggers(ctx, maxItems);
+  await ctx.step('discover', 'Scanning Reddit, Hacker News, and Indie Hackers for SaaS pricing pain…');
+  const seenIds = await ctx.getRecentSourceIds(30);
+  const externalData = await fetchExternalTriggers(ctx, maxItems, minScore, seenIds);
   await ctx.checkpoint();
 
   if (!externalData || externalData.length === 0) {
@@ -54,8 +78,8 @@ export default async function run(ctx) {
   }
 
   await ctx.step('analyze', 'Evaluating candidates against technical scope and build feasibility…');
-  await ctx.log('Calling OpenAI to analyze SaaS pain-point candidates…', 'info', 'analyze');
-  const validationResult = await analyzeCandidates(externalData, allowedTags);
+  await ctx.log(`Calling OpenAI to analyze ${externalData.length} ranked SaaS pain-point candidates…`, 'info', 'analyze');
+  const validationResult = await analyzeCandidates(externalData, allowedTags, seenIds);
   await ctx.checkpoint();
 
   if (!validationResult.isValid) {
@@ -69,9 +93,11 @@ export default async function run(ctx) {
   const builtContent = await draftStructuredPost(validationResult.targetData, allowedTags);
   await ctx.checkpoint();
 
+  validateBodyBlocks(builtContent.bodyBlocks);
+
   const post = await ctx.saveDraft({
     title: builtContent.title,
-    slug: builtContent.slug || '',
+    slug: builtContent.slug || `${hashSlug(builtContent.title)}-${hashSlug(validationResult.targetData.id)}`.slice(0, 80),
     excerpt: builtContent.excerpt,
     body: builtContent.bodyBlocks,
     read_time: builtContent.readTime || '6 min',
@@ -87,54 +113,89 @@ export default async function run(ctx) {
   return { postId: post.id, slug: post.slug, source: validationResult.targetData.id };
 }
 
-async function fetchExternalTriggers(ctx, limit) {
-  const subreddits = ctx.config.subreddits || ['saas', 'sideproject', 'smallbusiness'];
-  const candidates = [];
+async function fetchExternalTriggers(ctx, limit, minScore, seenIds) {
+  const subreddits = ctx.config.subreddits || DEFAULT_SUBREDDITS;
+  const redditSorts = ctx.config.redditSorts || ['hot', 'top', 'new'];
+  const hnQueries = ctx.config.hnQueries || DEFAULT_HN_QUERIES;
+  const baseKeywords = ctx.config.painKeywords || BASE_PAIN_KEYWORDS;
+
+  const fetchers = [];
 
   for (const sub of subreddits) {
-    try {
-      const url = `https://www.reddit.com/r/${sub}/new.json?limit=${Math.min(limit, 25)}`;
-      const res = await fetchWithTimeout(url, {
-        headers: { 'User-Agent': 'CreativeBuildsBlogAgent/1.0' },
-      }, 12000);
-
-      if (!res.ok) {
-        await ctx.log(`Reddit r/${sub} returned ${res.status}`, 'warn', 'discover');
-        continue;
-      }
-
-      const json = await res.json();
-      const posts = json?.data?.children || [];
-
-      for (const child of posts) {
-        const p = child?.data;
-        if (!p?.title) continue;
-        const text = `${p.title} ${p.selftext || ''}`.toLowerCase();
-        if (!PAIN_KEYWORDS.some((kw) => text.includes(kw))) continue;
-
-        candidates.push({
-          id: `reddit-${p.id}`,
-          title: p.title,
-          source: `reddit/r/${sub}`,
-          url: `https://reddit.com${p.permalink}`,
-          snippet: (p.selftext || p.title).slice(0, 400),
-          rawText: text,
-        });
-      }
-    } catch (err) {
-      await ctx.log(`Reddit r/${sub} fetch failed: ${err.message}`, 'warn', 'discover');
+    for (const sort of redditSorts) {
+      fetchers.push(async () => {
+        try {
+          const posts = await fetchRedditPosts(sub, { sort, time: 'week', limit: 25 });
+          return posts;
+        } catch (err) {
+          await ctx.log(`Reddit r/${sub}/${sort} failed: ${err.message}`, 'warn', 'discover');
+          return [];
+        }
+      });
     }
   }
 
-  if (candidates.length === 0) {
-    await ctx.log('Live Reddit feeds empty — using seed candidates', 'warn', 'discover');
-    return SEED_CANDIDATES.slice(0, limit);
+  for (const query of hnQueries) {
+    fetchers.push(async () => {
+      try {
+        return await searchHackerNews(query, 10);
+      } catch (err) {
+        await ctx.log(`HN search "${query}" failed: ${err.message}`, 'warn', 'discover');
+        return [];
+      }
+    });
   }
 
-  return candidates.slice(0, limit);
+  fetchers.push(async () => {
+    try {
+      const items = await fetchRssFeed(INDIE_HACKERS_FEED, 10);
+      return items.map((item) => ({
+        id: `ih-${hashSlug(item.title)}`,
+        title: item.title,
+        source: 'indiehackers',
+        url: item.link,
+        snippet: item.description.slice(0, 400),
+        rawText: `${item.title} ${item.description}`.toLowerCase(),
+        upvotes: 10,
+        comments: 0,
+        publishedAt: item.pubDate || null,
+        discoveredAt: new Date().toISOString(),
+        engagement: { upvotes: 10, comments: 0 },
+      }));
+    } catch (err) {
+      await ctx.log(`Indie Hackers feed failed: ${err.message}`, 'warn', 'discover');
+      return [];
+    }
+  });
+
+  const raw = await gatherCandidates(fetchers);
+  const expanded = expandKeywordsFromTitles(rankCandidates(raw, 15), 10);
+  const keywords = [...new Set([...baseKeywords, ...expanded])];
+
+  const filtered = filterByKeywords(raw, keywords);
+  const ranked = rankCandidates(filtered.length ? filtered : raw, limit * 2);
+  const aboveMin = ranked.filter((c) => c.score >= minScore);
+  const unseen = filterSeenSources(aboveMin.length ? aboveMin : ranked, seenIds);
+  const final = unseen.slice(0, limit);
+
+  await ctx.log(
+    `Discovered ${raw.length} candidates, ${filtered.length} keyword matches, ranked top ${ranked.length}, skipping ${ranked.length - unseen.length} seen sources`,
+    'info',
+    'discover',
+  );
+
+  if (final.length === 0) {
+    if (ctx.config.useSeedFallback === true) {
+      await ctx.log('Live feeds empty — using seed candidates (useSeedFallback enabled)', 'warn', 'discover');
+      return SEED_CANDIDATES.slice(0, limit);
+    }
+    return [];
+  }
+
+  return final;
 }
 
-async function analyzeCandidates(data, allowedTags) {
+async function analyzeCandidates(data, allowedTags, seenIds) {
   const schemaHint = `{
   "isValid": boolean,
   "reason": "string if rejected",
@@ -154,9 +215,10 @@ async function analyzeCandidates(data, allowedTags) {
   const result = await generateJSON({
     system: `You are a technical agency analyst. Pick ONE SaaS pain-point candidate that can be replaced with a lean Node/React automation on a $5 VPS.
 Reject enterprise-only migrations (Salesforce org migrations, SAP, Oracle ERP).
+Do NOT pick candidates whose id is in this already-covered list: ${seenIds.join(', ') || 'none'}.
 Only use tech tags from this whitelist: ${allowedTags.join(', ')}.
 If no candidate fits, set isValid false with a clear reason.`,
-    user: `Candidates:\n${JSON.stringify(data, null, 2)}`,
+    user: `Top ranked candidates (pick the best ONE):\n${JSON.stringify(data, null, 2)}`,
     schemaHint,
     temperature: 0.2,
   });
@@ -176,6 +238,10 @@ If no candidate fits, set isValid false with a clear reason.`,
 
   if (result.targetData?.buildComplexity === 'enterprise-only') {
     return { isValid: false, reason: 'Enterprise-only migration rejected by guardrail' };
+  }
+
+  if (seenIds.includes(String(result.targetData?.id))) {
+    return { isValid: false, reason: 'Source already covered in prior run' };
   }
 
   return { isValid: true, targetData: result.targetData };
@@ -200,6 +266,7 @@ async function draftStructuredPost(targetData, allowedTags) {
 Voice: first-person plural builder ("We deploy...", "In our production environments...").
 Rules:
 - NO dictionary definitions or generic fluff.
+- First body block MUST include an outbound link to the source URL for E-E-A-T.
 - Every H2/H3 section must answer the reader's question in the first two sentences (SGE optimization).
 - Include proof-of-work: architecture diagram as text, a Node.js or React code snippet, and a docker-compose or nginx config block.
 - Use only these tech tags: ${allowedTags.join(', ')}.
@@ -215,7 +282,7 @@ Problem: ${targetData.problemSummary || targetData.sourceTitle}
 Source: ${targetData.sourceUrl || ''}
 
 Body structure (each as separate bodyBlocks string):
-1. Problem breakdown — why founders overpay
+1. Problem breakdown with outbound link to source — why founders overpay
 2. ## The Hidden Costs of ${targetData.saasName}
 3. ## Lean Architecture: ${stackLabel} on a $5 VPS
 4. Code snippet mockup (Node cron + webhook handler or similar)
@@ -234,12 +301,8 @@ Body structure (each as separate bodyBlocks string):
   };
 }
 
-async function fetchWithTimeout(url, options = {}, ms = 10000) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), ms);
-  try {
-    return await fetch(url, { ...options, signal: controller.signal });
-  } finally {
-    clearTimeout(timer);
+function validateBodyBlocks(bodyBlocks) {
+  if (!Array.isArray(bodyBlocks) || bodyBlocks.length === 0 || !bodyBlocks.some((b) => String(b).trim())) {
+    throw new Error('LLM returned empty or invalid bodyBlocks array');
   }
 }
