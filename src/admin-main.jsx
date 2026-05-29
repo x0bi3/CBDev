@@ -54,7 +54,7 @@ function Btn({ children, onClick, variant = 'primary', className = '' }) {
   return <button type="button" onClick={onClick} className={base + styles + ' ' + className}>{children}</button>;
 }
 
-function Table({ columns, rows, onEdit, onDelete }) {
+function Table({ columns, rows, onEdit, onDelete, onView, extraActions }) {
   return (
     <div className="overflow-x-auto rounded-xl border border-slate-700">
       <table className="w-full text-left text-sm">
@@ -66,7 +66,9 @@ function Table({ columns, rows, onEdit, onDelete }) {
             <tr key={row.id || row.slug || row.app_id} className="border-t border-slate-700/80 hover:bg-slate-800/40">
               {columns.map(c => <td key={c.key} className="max-w-xs truncate px-4 py-2.5">{c.render ? c.render(row) : row[c.key]}</td>)}
               <td className="px-4 py-2.5 whitespace-nowrap">
-                <Btn variant="ghost" onClick={() => onEdit(row)}>Edit</Btn>
+                {onView && <Btn variant="ghost" onClick={() => onView(row)}>View</Btn>}
+                {extraActions?.(row)}
+                <Btn variant="ghost" className={onView || extraActions ? 'ml-2' : ''} onClick={() => onEdit(row)}>Edit</Btn>
                 <Btn variant="danger" className="ml-2" onClick={() => onDelete(row)}>Delete</Btn>
               </td>
             </tr>
@@ -665,9 +667,57 @@ function BlogAgentsSection() {
   );
 }
 
+function BlogPostPreview({ post, onClose }) {
+  const body = Array.isArray(post.body) ? post.body : [];
+  const date = post.published_at
+    ? new Date(post.published_at).toLocaleDateString()
+    : 'Unpublished draft';
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4" onClick={onClose}>
+      <div
+        className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-slate-600 bg-[#0a0a0f] p-6 text-slate-100 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <span className="text-xs uppercase tracking-wider text-slate-400">Public preview</span>
+          <Btn variant="ghost" onClick={onClose}>Close</Btn>
+        </div>
+        <article>
+          <p className="text-[11px] uppercase tracking-wider text-slate-500">
+            {date} · {post.read_time || '5 min'}
+          </p>
+          <h1 className="mt-2 text-[28px] font-bold leading-tight text-white">{post.title || 'Untitled'}</h1>
+          {post.excerpt && (
+            <p className="mt-3 text-[15px] italic leading-relaxed text-slate-400">{post.excerpt}</p>
+          )}
+          <div className="mt-6 flex flex-col gap-4 text-[15px] leading-relaxed text-slate-200">
+            {body.length === 0 && <p className="text-slate-500">No body content yet.</p>}
+            {body.map((block, i) => {
+              if (String(block).startsWith('### ')) {
+                return <h3 key={i} className="text-base font-semibold text-white">{String(block).slice(4)}</h3>;
+              }
+              if (String(block).startsWith('## ')) {
+                return <h2 key={i} className="text-lg font-semibold text-white">{String(block).slice(3)}</h2>;
+              }
+              return <p key={i}>{block}</p>;
+            })}
+          </div>
+          {post.status === 'draft' && (
+            <p className="mt-6 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+              Draft preview — not visible on the public site until published.
+            </p>
+          )}
+        </article>
+      </div>
+    </div>
+  );
+}
+
 function BlogSection() {
   const [rows, setRows] = useState([]);
   const [edit, setEdit] = useState(null);
+  const [preview, setPreview] = useState(null);
   const load = () => api('/admin/blog').then(r => setRows(r.posts));
   useEffect(() => { load(); }, []);
   const save = async () => {
@@ -676,10 +726,29 @@ function BlogSection() {
     else await api('/admin/blog', { method: 'POST', body });
     setEdit(null); load();
   };
+  const publish = async (row) => {
+    if (!confirm(`Publish "${row.title}"?`)) return;
+    await api('/admin/blog/' + row.id + '/publish', { method: 'POST' });
+    load();
+  };
   return (
     <div>
       <div className="mb-4 flex justify-between"><h2 className="text-xl font-semibold">Blog</h2><Btn onClick={() => setEdit({ title:'', status:'draft', bodyJson:'[]', read_time:'5 min' })}>Add post</Btn></div>
-      <Table columns={[{key:'title',label:'Title'},{key:'status',label:'Status'},{key:'published_at',label:'Published',render:r=>r.published_at?new Date(r.published_at).toLocaleDateString():'—'}]} rows={rows} onEdit={r=>setEdit({...r,bodyJson:JSON.stringify(r.body||[],null,2),published_at:r.published_at?r.published_at.slice(0,16):''})} onDelete={async r=>{if(confirm('Delete?')){await api('/admin/blog/'+r.id,{method:'DELETE'});load();}}} />
+      <Table
+        columns={[
+          { key: 'title', label: 'Title' },
+          { key: 'status', label: 'Status' },
+          { key: 'published_at', label: 'Published', render: r => r.published_at ? new Date(r.published_at).toLocaleDateString() : '—' },
+        ]}
+        rows={rows}
+        onView={(r) => setPreview(r)}
+        extraActions={(r) => r.status === 'draft' ? (
+          <Btn className="ml-2" onClick={() => publish(r)}>Publish</Btn>
+        ) : null}
+        onEdit={(r) => setEdit({ ...r, bodyJson: JSON.stringify(r.body || [], null, 2), published_at: r.published_at ? r.published_at.slice(0, 16) : '' })}
+        onDelete={async (r) => { if (confirm('Delete?')) { await api('/admin/blog/' + r.id, { method: 'DELETE' }); load(); } }}
+      />
+      {preview && <BlogPostPreview post={preview} onClose={() => setPreview(null)} />}
       {edit && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => setEdit(null)}>
           <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-slate-600 bg-slate-900 p-6" onClick={e=>e.stopPropagation()}>
@@ -693,7 +762,14 @@ function BlogSection() {
               <Field label="Excerpt"><textarea className={inputCls()} rows={2} value={edit.excerpt||''} onChange={e=>setEdit({...edit,excerpt:e.target.value})} /></Field>
               <Field label="Body paragraphs JSON"><textarea className={inputCls('font-mono text-xs')} rows={6} value={edit.bodyJson||'[]'} onChange={e=>setEdit({...edit,bodyJson:e.target.value})} /></Field>
             </div>
-            <div className="mt-6 flex gap-2"><Btn onClick={save}>Save</Btn><Btn variant="ghost" onClick={()=>setEdit(null)}>Cancel</Btn></div>
+            <div className="mt-6 flex flex-wrap gap-2">
+              <Btn onClick={save}>Save</Btn>
+              <Btn variant="ghost" onClick={() => setPreview({ ...edit, body: JSON.parse(edit.bodyJson || '[]') })}>Preview</Btn>
+              {edit.id && edit.status === 'draft' && (
+                <Btn onClick={async () => { await publish(edit); setEdit(null); }}>Publish</Btn>
+              )}
+              <Btn variant="ghost" onClick={()=>setEdit(null)}>Cancel</Btn>
+            </div>
           </div>
         </div>
       )}

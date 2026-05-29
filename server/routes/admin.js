@@ -148,6 +148,16 @@ router.put('/blog/:id', async (req, res) => {
   res.json({ post: rows[0] });
 });
 
+router.post('/blog/:id/publish', async (req, res) => {
+  const { rows } = await query(
+    `UPDATE blog_posts SET status = 'published', published_at = COALESCE(published_at, NOW())
+     WHERE id = $1 RETURNING *`,
+    [req.params.id],
+  );
+  if (!rows[0]) { res.status(404).json({ error: 'Not found' }); return; }
+  res.json({ post: rows[0] });
+});
+
 router.delete('/blog/:id', async (req, res) => {
   await query('DELETE FROM blog_posts WHERE id = $1', [req.params.id]);
   res.json({ ok: true });
