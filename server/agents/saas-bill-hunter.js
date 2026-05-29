@@ -97,7 +97,7 @@ export default async function run(ctx) {
 
   const post = await ctx.saveDraft({
     title: builtContent.title,
-    slug: builtContent.slug || `${hashSlug(builtContent.title)}-${hashSlug(validationResult.targetData.id)}`.slice(0, 80),
+    slug: `${hashSlug(builtContent.title)}-${hashSlug(validationResult.targetData.id)}`.slice(0, 90),
     excerpt: builtContent.excerpt,
     body: builtContent.bodyBlocks,
     read_time: builtContent.readTime || '6 min',

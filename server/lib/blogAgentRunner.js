@@ -9,6 +9,19 @@ function slugify(text) {
     .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'post';
 }
 
+async function ensureUniqueSlug(baseSlug) {
+  const normalized = String(baseSlug || 'post').slice(0, 120) || 'post';
+  const { rows } = await query('SELECT 1 FROM blog_posts WHERE slug = $1 LIMIT 1', [normalized]);
+  if (!rows.length) return normalized;
+
+  for (let n = 2; n < 100; n++) {
+    const candidate = `${normalized.slice(0, 110)}-${n}`;
+    const { rows: hit } = await query('SELECT 1 FROM blog_posts WHERE slug = $1 LIMIT 1', [candidate]);
+    if (!hit.length) return candidate;
+  }
+  return `${normalized.slice(0, 100)}-${Date.now()}`;
+}
+
 async function touchAgent(agentId, patch) {
   const sets = [];
   const vals = [];
@@ -111,7 +124,7 @@ async function runAgentJob(agent, runId, handle) {
       );
     },
     saveDraft: async (draft) => {
-      const slug = draft.slug || slugify(draft.title);
+      const slug = await ensureUniqueSlug(draft.slug || slugify(draft.title));
       const { rows } = await query(
         `INSERT INTO blog_posts (slug, title, excerpt, body, read_time, status, published_at)
          VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7) RETURNING id, slug, title, status`,
