@@ -9,11 +9,14 @@ import portfolioRoutes from './routes/portfolio.js';
 import blogRoutes from './routes/blog.js';
 import ticketsRoutes from './routes/tickets.js';
 import calendarRoutes from './routes/calendar.js';
+import homeRoutes from './routes/home.js';
+import adminRoutes from './routes/admin.js';
 import { pool } from './db.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, '..');
 const distDir = resolve(root, 'dist');
+const adminDist = resolve(distDir, 'admin');
 const envPath = resolve(root, '.env');
 
 function loadEnv() {
@@ -38,12 +41,17 @@ loadEnv();
 const app = express();
 const PORT = Number(process.env.PORT) || 3020;
 
-app.use(express.json({ limit: '1mb' }));
+function isAdminHost(req) {
+  const host = (req.headers.host || '').split(':')[0].toLowerCase();
+  return host === 'admin.creativebuilds.dev' || host.startsWith('admin.');
+}
+
+app.use(express.json({ limit: '2mb' }));
 
 app.get('/api/health', async (_req, res) => {
   try {
     await pool.query('SELECT 1');
-    res.json({ ok: true });
+    res.json({ ok: true, admin: isAdminHost(_req) });
   } catch (err) {
     console.error('health check failed:', err);
     res.status(503).json({ ok: false, error: 'Database unavailable' });
@@ -56,11 +64,35 @@ app.use('/api/portfolio', portfolioRoutes);
 app.use('/api/blog', blogRoutes);
 app.use('/api/tickets', ticketsRoutes);
 app.use('/api/calendar', calendarRoutes);
+app.use('/api/home', homeRoutes);
+app.use('/api/admin', adminRoutes);
+
+if (existsSync(adminDist)) {
+  app.use((req, res, next) => {
+    if (!isAdminHost(req)) return next();
+    if (req.path.startsWith('/api')) return next();
+    express.static(adminDist, { index: false })(req, res, (err) => {
+      if (err) return next(err);
+      if (req.method !== 'GET') return next();
+      res.sendFile(resolve(adminDist, 'index.html'));
+    });
+  });
+}
 
 if (existsSync(distDir)) {
-  app.use(express.static(distDir, { index: false }));
+  app.use((req, res, next) => {
+    if (isAdminHost(req) && !req.path.startsWith('/api')) return next();
+    express.static(distDir, { index: false })(req, res, next);
+  });
   app.get('*', (req, res, next) => {
     if (req.path.startsWith('/api')) return next();
+    if (isAdminHost(req)) {
+      if (existsSync(adminDist)) {
+        res.sendFile(resolve(adminDist, 'index.html'));
+        return;
+      }
+      return next();
+    }
     res.sendFile(resolve(distDir, 'index.html'));
   });
 } else {

@@ -60,21 +60,35 @@ router.get('/slots', requireAuth, async (req, res) => {
     }
 
     const durationMin = meetingType.duration_minutes;
+    const { rows: settingsRows } = await query('SELECT * FROM availability_settings WHERE id = 1');
+    const settings = settingsRows[0] || {
+      timezone: TZ,
+      weekday_start: '09:00',
+      weekday_end: '17:00',
+      slot_interval_minutes: 30,
+      work_weekdays: [1, 2, 3, 4, 5],
+      blocked_dates: [],
+    };
+    const tz = settings.timezone || TZ;
+
     const { rows } = await query(
-      `WITH bounds AS (
+      `WITH s AS (SELECT * FROM availability_settings WHERE id = 1),
+       bounds AS (
          SELECT
-           ($1::date::timestamp AT TIME ZONE $3) AS day_start,
-           (($1::date + 1)::date::timestamp AT TIME ZONE $3) AS day_end
+           ($1::date::timestamp AT TIME ZONE (SELECT timezone FROM s)) AS day_start,
+           (($1::date + 1)::date::timestamp AT TIME ZONE (SELECT timezone FROM s)) AS day_end
        ),
        candidates AS (
          SELECT gs AS starts_at
-         FROM bounds,
+         FROM bounds, s,
          generate_series(
-           (SELECT day_start + interval '9 hours' FROM bounds),
-           (SELECT day_start + interval '17 hours' FROM bounds) - ($2::int * interval '1 minute'),
-           interval '30 minutes'
+           (SELECT day_start + s.weekday_start FROM bounds, s),
+           (SELECT day_start + s.weekday_end FROM bounds, s) - ($2::int * interval '1 minute'),
+           ((SELECT slot_interval_minutes FROM s) || ' minutes')::interval
          ) AS gs
-         WHERE extract(isodow FROM (gs AT TIME ZONE $3)) BETWEEN 1 AND 5
+         WHERE extract(isodow FROM (gs AT TIME ZONE (SELECT timezone FROM s)))
+           = ANY((SELECT work_weekdays FROM s))
+           AND NOT ($1::date = ANY(COALESCE((SELECT blocked_dates FROM s), '{}')))
        )
        SELECT c.starts_at
        FROM candidates c
@@ -87,7 +101,7 @@ router.get('/slots', requireAuth, async (req, res) => {
              AND b.ends_at > c.starts_at
          )
        ORDER BY c.starts_at`,
-      [date, durationMin, TZ],
+      [date, durationMin],
     );
 
     const slots = rows.map((r) => {
@@ -95,7 +109,7 @@ router.get('/slots', requireAuth, async (req, res) => {
       return {
         startsAt: r.starts_at,
         label: d.toLocaleTimeString('en-US', {
-          timeZone: TZ,
+          timeZone: tz,
           hour: 'numeric',
           minute: '2-digit',
         }),

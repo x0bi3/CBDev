@@ -78,3 +78,15 @@ export function requireAuth(req, res, next) {
   }
   next();
 }
+
+export function requireAdmin(req, res, next) {
+  if (!attachUserFromToken(req)) {
+    res.status(401).json({ error: 'Authentication required' });
+    return;
+  }
+  if (req.userRole !== 'admin') {
+    res.status(403).json({ error: 'Admin access required' });
+    return;
+  }
+  next();
+}

@@ -17,10 +17,14 @@ export default defineConfig({
   build: {
     target: 'es2020',
     rollupOptions: {
+      input: {
+        main: path.resolve(__dirname, 'index.html'),
+        admin: path.resolve(__dirname, 'admin/index.html'),
+      },
       output: {
-        manualChunks: {
-          'react-vendor': ['react', 'react-dom'],
-          'framer-motion': ['framer-motion'],
+        manualChunks: (id) => {
+          if (id.includes('framer-motion')) return 'framer-motion';
+          if (id.includes('node_modules/react')) return 'react-vendor';
         },
       },
     },

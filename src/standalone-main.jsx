@@ -139,6 +139,18 @@ function DeviceProvider({ children }) {
   const authRef = useRef(null);
   authRef.current = auth;
   const [authOpen, setAuthOpen] = useState(false);
+  const [screenApps, setScreenApps] = useState({ home: homeApps, dock: dockApps });
+
+  useEffect(() => {
+    api('/home/apps', { auth: false })
+      .then((r) => {
+        setScreenApps({
+          home: r.home?.length ? r.home.map(mapHomeAppFromApi) : homeApps,
+          dock: r.dock?.length ? r.dock.map(mapHomeAppFromApi) : dockApps,
+        });
+      })
+      .catch(() => { /* keep defaults */ });
+  }, []);
 
   // --- Music engine: src+play side-effect runs when station changes ---
   useEffect(() => {
@@ -265,7 +277,7 @@ function DeviceProvider({ children }) {
     openAppId, prevAppId, shellAppId, openApp, closeApp, handleShellExitComplete,
     ccOpen, toggleCc, closeCc,
     appOrder, setAppOrder, resetAppOrder,
-    auth, setAuth, authOpen, openAuth, closeAuth,
+    auth, setAuth, authOpen, openAuth, closeAuth, screenApps,
     profileBtnRef, themeBtnRef, musicBtnRef,
     // music
     audioRef,
@@ -274,7 +286,7 @@ function DeviceProvider({ children }) {
     miniPlayerOpen, openMiniPlayer, closeMiniPlayer,
     // gesture lock
     dragLocked, lockDrag, unlockDrag,
-  }), [themeId, eyeId, homePage, openAppId, prevAppId, shellAppId, ccOpen, appOrder, auth, authOpen,
+  }), [themeId, eyeId, homePage, openAppId, prevAppId, shellAppId, ccOpen, appOrder, auth, authOpen, screenApps,
       musicCurrent, musicPlaying, musicVolume, musicStatus, miniPlayerOpen, dragLocked,
       openApp, closeApp, handleShellExitComplete, setAppOrder, resetAppOrder, setAuth, openAuth, closeAuth,
       toggleCc, closeCc, playStation, togglePlay, setMusicVolume, openMiniPlayer, closeMiniPlayer,
@@ -298,19 +310,23 @@ const calendarApp = {
   id:'calendar', label:'Calendar', tile:'linear-gradient(135deg,#34d399,#0f766e)', glyph:'📅',
 };
 
-function resolveHomeApps(appOrder, isAuthed) {
-  const byId = Object.fromEntries(homeApps.map(a => [a.id, a]));
-  const baseIds = appOrder && Array.isArray(appOrder) ? appOrder : homeApps.map(a => a.id);
+function resolveHomeApps(appOrder, isAuthed, baseHome = homeApps) {
+  const byId = Object.fromEntries(baseHome.map(a => [a.id, a]));
+  const baseIds = appOrder && Array.isArray(appOrder) ? appOrder : baseHome.map(a => a.id);
   const seen = new Set();
   const out = [];
   for (const id of baseIds) {
     if (byId[id] && !seen.has(id)) { out.push(byId[id]); seen.add(id); }
   }
-  for (const a of homeApps) {
+  for (const a of baseHome) {
     if (!seen.has(a.id)) { out.push(a); seen.add(a.id); }
   }
   if (isAuthed) out.push(calendarApp);
   return out;
+}
+
+function mapHomeAppFromApi(a) {
+  return { id: a.id, label: a.label, glyph: a.glyph, tile: a.tile, portfolioSlug: a.portfolioSlug || null };
 }
 const dockApps = [
   { id:'about',     label:'About',     tile:'linear-gradient(135deg,#60a5fa,#1e40af)', glyph:'👤' },
@@ -1753,8 +1769,13 @@ function MusicApp() {
 /* Standalone project app. Launches straight into a project's detail page. */
 function makeProjectApp(projectId) {
   return function ProjectStandaloneApp() {
-    const project = work.find(p => p.id === projectId);
-    if (!project) return <AppShell title="Not found"><Card>Project missing.</Card></AppShell>;
+    const [project, setProject] = useState(() => work.find(p => p.id === projectId) || null);
+    useEffect(() => {
+      api('/portfolio/' + encodeURIComponent(projectId), { auth: false })
+        .then((r) => { if (r.project) setProject(r.project); })
+        .catch(() => {});
+    }, []);
+    if (!project) return <AppShell title="Loading…"><Card>Loading project…</Card></AppShell>;
     return (
       <div className="mx-auto max-w-md px-5">
         <Card className="!p-0 overflow-hidden">
@@ -2047,6 +2068,14 @@ const appViews = {
   'project-c':makeProjectApp('project-c'),
 };
 
+function getAppComponent(app) {
+  if (!app) return null;
+  if (appViews[app.id]) return appViews[app.id];
+  const slug = app.portfolioSlug || app.id;
+  if (slug) return makeProjectApp(slug);
+  return null;
+}
+
 /* ========================= DEVICE CHROME ========================= */
 function useClock() {
   const [now, setNow] = useState(() => new Date());
@@ -2269,12 +2298,12 @@ function AppIcon({ app, onTap, showLabel = true, size = APP_TILE_SIZE }) {
 const PAGE_SIZE = 20; // 4 cols x 5 rows per page
 
 function HomeGrid() {
-  const { openApp, setHomePage, appOrder, auth } = useDevice();
+  const { openApp, setHomePage, appOrder, auth, screenApps } = useDevice();
   const scrollerRef = React.useRef(null);
 
   const orderedApps = React.useMemo(
-    () => resolveHomeApps(appOrder, !!auth),
-    [appOrder, auth],
+    () => resolveHomeApps(appOrder, !!auth, screenApps.home),
+    [appOrder, auth, screenApps.home],
   );
 
   const fullPages = Math.ceil(orderedApps.length / PAGE_SIZE) || 0;
@@ -2381,8 +2410,8 @@ function HomeGrid() {
 
 /* Reusable dots, driven by context. */
 function PageDots() {
-  const { homePage, setHomePage, appOrder, auth } = useDevice();
-  const visibleCount = resolveHomeApps(appOrder, !!auth).length;
+  const { homePage, setHomePage, appOrder, auth, screenApps } = useDevice();
+  const visibleCount = resolveHomeApps(appOrder, !!auth, screenApps.home).length;
   const fullPages = Math.ceil(visibleCount / PAGE_SIZE) || 0;
   const total = fullPages + 1;
   const scrollTo = (idx) => {
@@ -2403,13 +2432,13 @@ function PageDots() {
 }
 
 function Dock() {
-  const { openApp } = useDevice();
+  const { openApp, screenApps } = useDevice();
   return (
     <div className="px-6 pb-2">
       <div className="mx-auto w-full max-w-2xl">
         <div className="glass-liquid rounded-[36px] px-6 py-4">
           <div className="flex items-end justify-around gap-2">
-            {dockApps.map(app => (
+            {screenApps.dock.map(app => (
               <AppIcon key={app.id} app={app} onTap={a => openApp(a.id)} showLabel={true} size={62} />
             ))}
           </div>
@@ -2427,7 +2456,7 @@ const TILE_CLOSE_S = 1.30; // 1s longer than content so tile lingers during morp
 
 function AppView({ app, isOpen, onClose, onExitComplete }) {
   const { openAppId, prevAppId, openApp, dragLocked } = useDevice();
-  const View = appViews[app.id];
+  const View = getAppComponent(app);
 
   const entryRef = React.useRef(null);
   if (entryRef.current === null) {
