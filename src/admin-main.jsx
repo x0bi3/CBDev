@@ -603,26 +603,48 @@ function TicketsSection() {
   };
   return (
     <div>
-      <h2 className="text-xl font-semibold">Support tickets</h2>
+      <h2 className="text-xl font-semibold text-white">Support tickets</h2>
+      <p className="mt-1 text-sm text-slate-400">Submitted from the Support app on the main site.</p>
       <div className="mt-4 grid gap-6 lg:grid-cols-2">
-        <Table columns={[{key:'subject',label:'Subject'},{key:'email',label:'Email'},{key:'status',label:'Status'},{key:'priority',label:'Priority'}]} rows={rows} onEdit={open} onDelete={async ()=>{}} />
+        <Table
+          columns={[
+            { key: 'subject', label: 'Subject' },
+            { key: 'contact_name', label: 'Name', render: r => r.contact_name || r.user_name || '—' },
+            { key: 'category', label: 'Category' },
+            { key: 'status', label: 'Status' },
+            { key: 'priority', label: 'Priority' },
+          ]}
+          rows={rows}
+          onEdit={open}
+          onDelete={async () => {}}
+        />
         {detail && (
-          <div className="rounded-xl border border-slate-700 p-4">
-            <h3 className="font-semibold">{detail.ticket.subject}</h3>
-            <p className="text-sm text-slate-400">{detail.ticket.email} · {detail.ticket.status} · {detail.ticket.priority}</p>
+          <div className="rounded-xl border border-slate-500 bg-slate-800/80 p-4 text-slate-100">
+            <h3 className="font-semibold text-white">#{detail.ticket.id} — {detail.ticket.subject}</h3>
+            <dl className="mt-2 grid gap-1 text-sm text-slate-300">
+              <div><span className="text-slate-500">Name:</span> {detail.ticket.contact_name || detail.ticket.user_name || '—'}</div>
+              <div><span className="text-slate-500">Email:</span> {detail.ticket.email}</div>
+              {detail.ticket.contact_phone && <div><span className="text-slate-500">Phone:</span> {detail.ticket.contact_phone}</div>}
+              <div><span className="text-slate-500">Category:</span> {detail.ticket.category} · <span className="text-slate-500">Priority:</span> {detail.ticket.priority}</div>
+            </dl>
             <div className="mt-4 max-h-64 space-y-2 overflow-y-auto">
               {detail.messages.map(m => (
-                <div key={m.id} className={'rounded-lg px-3 py-2 text-sm ' + (m.sender === 'staff' ? 'bg-indigo-900/50' : 'bg-slate-800')}>
-                  <span className="text-xs text-slate-400">{m.sender}</span>
-                  <p className="mt-1">{m.body}</p>
+                <div key={m.id} className={'rounded-lg px-3 py-2 text-sm ' + (m.sender === 'staff' ? 'bg-indigo-900/50' : 'bg-slate-900')}>
+                  <span className="text-xs text-slate-400">{m.sender} · {new Date(m.created_at).toLocaleString()}</span>
+                  <p className="mt-1 whitespace-pre-wrap">{m.body}</p>
                 </div>
               ))}
             </div>
-            <textarea className={inputCls() + ' mt-3'} rows={3} placeholder="Staff reply…" value={reply} onChange={e=>setReply(e.target.value)} />
+            <textarea className={inputCls() + ' mt-3'} rows={3} placeholder="Staff reply…" value={reply} onChange={e => setReply(e.target.value)} />
             <Btn className="mt-2" onClick={sendReply}>Send reply</Btn>
-            <select className={inputCls() + ' mt-3'} value={detail.ticket.status} onChange={async e=>{await api('/admin/tickets/'+detail.ticket.id,{method:'PATCH',body:{status:e.target.value}});open(detail.ticket);load();}}>
-              <option>open</option><option>closed</option><option>pending</option>
-            </select>
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <select className={inputCls()} value={detail.ticket.status} onChange={async e => { await api('/admin/tickets/' + detail.ticket.id, { method: 'PATCH', body: { status: e.target.value } }); open(detail.ticket); load(); }}>
+                <option value="open">open</option><option value="pending">pending</option><option value="closed">closed</option>
+              </select>
+              <select className={inputCls()} value={detail.ticket.priority} onChange={async e => { await api('/admin/tickets/' + detail.ticket.id, { method: 'PATCH', body: { priority: e.target.value } }); open(detail.ticket); load(); }}>
+                <option>Low</option><option>Normal</option><option>High</option><option>Urgent</option>
+              </select>
+            </div>
           </div>
         )}
       </div>

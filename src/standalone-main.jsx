@@ -1457,163 +1457,125 @@ const SettingsApp = () => {
 };
 
 /* ===================== SUPPORT APP ===================== */
-const supportCategories = ['Bug / Issue','Feature Request','Billing','Account / Login','Technical Question','Other'];
-const supportPriorities = ['Low','Normal','High','Urgent'];
+const supportCategories = [
+  'Website update',
+  'Bug / issue',
+  'Content change',
+  'New feature request',
+  'Performance / hosting',
+  'Account / access',
+  'Other',
+];
+const supportPriorities = ['Low', 'Normal', 'High', 'Urgent'];
+
+const supportFieldCls = 'rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-[14px] outline-none focus:border-white/30';
 
 function SupportApp() {
-  const [mode, setMode] = useState('home'); // home | login | guest | submitted
-  const [loggedIn, setLoggedIn] = useState(false);
-  const [clientName, setClientName] = useState('');
+  const { auth, openAuth } = useDevice();
+  const [submittedTicket, setSubmittedTicket] = useState(null);
 
-  // Reset everything when navigating home
-  const goHome = () => { setMode('home'); };
-
-  return (
-    <>
-      <AppShell title="Support" subtitle="Open a ticket and we’ll respond fast. Existing clients get the express lane.">
-        {mode === 'home' && (
-          <>
-            <Card>
-              <div className="flex items-center gap-3">
-                <div className="grid h-11 w-11 place-items-center rounded-xl bg-sky-500/20 text-xl">🔑</div>
-                <div className="flex-1">
-                  <p className="text-[15px] font-semibold">Existing client</p>
-                  <p className="mt-0.5 text-[12px] text-white/65">Log in to skip the questions and route straight to your account team.</p>
-                </div>
-              </div>
-              <button onClick={() => setMode('login')}
-                className="mt-4 w-full rounded-2xl bg-white py-3 text-[14px] font-semibold text-black active:scale-[0.98]">
-                Log in for expedited support
-              </button>
-            </Card>
-            <Card>
-              <div className="flex items-center gap-3">
-                <div className="grid h-11 w-11 place-items-center rounded-xl bg-violet-500/20 text-xl">✍️</div>
-                <div className="flex-1">
-                  <p className="text-[15px] font-semibold">Submit a ticket</p>
-                  <p className="mt-0.5 text-[12px] text-white/65">No account needed. Provide a Client ID if you have one and we’ll route accordingly.</p>
-                </div>
-              </div>
-              <button onClick={() => setMode('guest')}
-                className="mt-4 w-full rounded-2xl border border-white/20 bg-white/5 py-3 text-[14px] font-semibold text-white active:scale-[0.98] hover:bg-white/10">
-                Open ticket form
-              </button>
-            </Card>
-            <Card>
-              <p className="text-[12px] uppercase tracking-wider text-white/50">Response times</p>
-              <div className="mt-2 space-y-1.5 text-white/85">
-                <p>• <span className="font-medium">Urgent</span>: within 2 business hours</p>
-                <p>• <span className="font-medium">High</span>: same business day</p>
-                <p>• <span className="font-medium">Normal</span>: within 24 hours</p>
-                <p>• <span className="font-medium">Low</span>: within 3 business days</p>
-              </div>
-            </Card>
-          </>
-        )}
-
-        {mode === 'login' && !loggedIn && (
-          <SupportLogin onBack={goHome} onSuccess={(name) => { setClientName(name); setLoggedIn(true); }} />
-        )}
-        {mode === 'login' && loggedIn && (
-          <SupportTicketForm authedName={clientName} onBack={goHome} onSubmitted={() => setMode('submitted')} />
-        )}
-        {mode === 'guest' && (
-          <SupportTicketForm onBack={goHome} onSubmitted={() => setMode('submitted')} />
-        )}
-        {mode === 'submitted' && (
-          <SupportSubmitted onDone={() => { setLoggedIn(false); setClientName(''); goHome(); }} />
-        )}
+  if (submittedTicket) {
+    return (
+      <AppShell title="Support" subtitle="Ticket received">
+        <SupportSubmitted ticket={submittedTicket} onDone={() => setSubmittedTicket(null)} />
       </AppShell>
-    </>
-  );
-}
+    );
+  }
 
-function SupportLogin({ onBack, onSuccess }) {
-  const [email, setEmail] = useState('');
-  const [pw, setPw] = useState('');
-  const [err, setErr] = useState(null);
-  const onSubmit = async (e) => {
-    e.preventDefault();
-    setErr(null);
-    try {
-      const r = await api('/auth/login', {
-        auth: false,
-        method: 'POST',
-        body: { email: email.trim().toLowerCase(), password: pw },
-      });
-      if (r.token) localStorage.setItem(API_TOKEN_KEY, r.token);
-      const n = r.user?.name || email.split('@')[0] || 'Client';
-      onSuccess(n);
-    } catch (ex) {
-      setErr(ex.message || 'Login failed');
-    }
-  };
   return (
-    <form onSubmit={onSubmit}>
-      <Card>
-        <p className="text-[12px] uppercase tracking-wider text-white/50">Client log in</p>
-        <p className="mt-1 text-[13px] text-white/65">Use your CreativeBuilds account (demo: demo@creativebuilds.dev / demo1234).</p>
-        <div className="mt-4 flex flex-col gap-3">
-          <label className="flex flex-col gap-1">
-            <span className="text-[11px] font-medium uppercase tracking-wider text-white/55">Email</span>
-            <input required type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@company.com"
-              className="rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-[14px] outline-none focus:border-white/30" />
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-[11px] font-medium uppercase tracking-wider text-white/55">Password</span>
-            <input required type="password" value={pw} onChange={e => setPw(e.target.value)} placeholder="••••••••"
-              className="rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-[14px] outline-none focus:border-white/30" />
-          </label>
-          <div className="flex gap-2 pt-1">
-            <button type="button" onClick={onBack} className="flex-1 rounded-2xl border border-white/15 py-3 text-[14px] font-semibold text-white/80">Cancel</button>
-            <button type="submit" className="flex-[2] rounded-2xl bg-white py-3 text-[14px] font-semibold text-black active:scale-[0.98]">Log in</button>
+    <AppShell title="Support" subtitle="Request website updates, report bugs, or ask for help. Clients with an account get priority routing.">
+      {!auth ? (
+        <Card>
+          <div className="flex items-center gap-3">
+            <div className="grid h-11 w-11 place-items-center rounded-xl bg-sky-500/20 text-xl">🔑</div>
+            <div className="flex-1">
+              <p className="text-[15px] font-semibold">Existing client?</p>
+              <p className="mt-0.5 text-[12px] text-white/65">Log in for expedited support — we’ll link the ticket to your account and you can track replies.</p>
+            </div>
           </div>
-          {err && <p className="text-[12px] text-rose-300">{err}</p>}
-          <button type="button" className="mt-1 text-[12px] text-white/55 hover:text-white">Forgot password?</button>
+          <button type="button" onClick={openAuth}
+            className="mt-4 w-full rounded-2xl bg-white py-3 text-[14px] font-semibold text-black active:scale-[0.98]">
+            Log in for expedited support
+          </button>
+        </Card>
+      ) : (
+        <Card>
+          <div className="flex items-center gap-3">
+            <div className="grid h-9 w-9 place-items-center rounded-full bg-emerald-500/25 text-base font-semibold text-emerald-200">
+              {(auth.name || auth.email || '?').charAt(0).toUpperCase()}
+            </div>
+            <div>
+              <p className="text-[14px] font-semibold">Signed in as {auth.name || auth.email}</p>
+              <p className="text-[11px] text-white/55">Priority routing enabled · view your tickets below</p>
+            </div>
+          </div>
+        </Card>
+      )}
+
+      <SupportTicketForm isClient={!!auth} onSubmitted={setSubmittedTicket} />
+
+      {auth && <SupportMyTickets />}
+
+      <Card>
+        <p className="text-[12px] uppercase tracking-wider text-white/50">Typical response times</p>
+        <div className="mt-2 space-y-1.5 text-[13px] text-white/80">
+          <p><span className="font-medium text-white">Urgent</span> — within 2 business hours (signed-in clients)</p>
+          <p><span className="font-medium text-white">High</span> — same business day</p>
+          <p><span className="font-medium text-white">Normal</span> — within 24 hours</p>
+          <p><span className="font-medium text-white">Low</span> — within 3 business days</p>
         </div>
       </Card>
-    </form>
+    </AppShell>
   );
 }
 
-function SupportTicketForm({ authedName, onBack, onSubmitted }) {
-  const { auth } = useDevice();
-  const [clientId, setClientId] = useState('');
+function SupportTicketForm({ isClient, onSubmitted }) {
+  const [contactName, setContactName] = useState('');
+  const [contactEmail, setContactEmail] = useState('');
+  const [contactPhone, setContactPhone] = useState('');
   const [title, setTitle] = useState('');
   const [category, setCategory] = useState(supportCategories[0]);
   const [priority, setPriority] = useState('Normal');
-  const [pref, setPref] = useState('Email'); // Email | Phone | Text
-  const [contactEmail, setContactEmail] = useState(auth?.email || '');
-  const [contactPhone, setContactPhone] = useState('');
   const [description, setDescription] = useState('');
   const [submitErr, setSubmitErr] = useState(null);
   const [submitting, setSubmitting] = useState(false);
 
-  // Conditional contact field based on preference
-  const needsEmail = pref === 'Email';
-  const needsPhone = pref === 'Phone' || pref === 'Text';
-
   const onSubmit = async (e) => {
     e.preventDefault();
     setSubmitErr(null);
+
+    if (!isClient) {
+      if (!contactName.trim()) { setSubmitErr('Please enter your name'); return; }
+      if (!contactEmail.trim() && !contactPhone.trim()) {
+        setSubmitErr('Please provide an email or phone number');
+        return;
+      }
+    }
+
     setSubmitting(true);
-    const email = (needsEmail ? contactEmail : (auth?.email || contactEmail)).trim().toLowerCase();
     try {
-      await api('/tickets', {
+      const r = await api('/tickets', {
         method: 'POST',
         body: {
           subject: title.trim(),
           message: description.trim(),
-          email,
+          contactName: isClient ? undefined : contactName.trim(),
+          email: contactEmail.trim() || undefined,
+          contactEmail: contactEmail.trim() || undefined,
+          contactPhone: contactPhone.trim() || undefined,
           category,
-          priority,
-          clientId: clientId.trim() || null,
-          contactPref: pref,
-          contactEmail: needsEmail ? email : (auth?.email || null),
-          contactPhone: needsPhone ? contactPhone.trim() : null,
+          priority: isClient ? priority : 'Normal',
+          contactPref: contactPhone.trim() ? (contactEmail.trim() ? 'Email' : 'Phone') : 'Email',
         },
       });
-      onSubmitted();
+      onSubmitted(r.ticket);
+      setTitle('');
+      setDescription('');
+      if (!isClient) {
+        setContactName('');
+        setContactEmail('');
+        setContactPhone('');
+      }
     } catch (err) {
       setSubmitErr(err.message || 'Failed to submit ticket');
     } finally {
@@ -1623,91 +1585,72 @@ function SupportTicketForm({ authedName, onBack, onSubmitted }) {
 
   return (
     <form onSubmit={onSubmit}>
-      {authedName && (
-        <Card>
-          <div className="flex items-center gap-3">
-            <div className="grid h-9 w-9 place-items-center rounded-full bg-emerald-500/25 text-base">✓</div>
-            <div>
-              <p className="text-[14px] font-semibold">Welcome back, {authedName}</p>
-              <p className="text-[11px] text-white/55">Your ticket will be routed to your account team automatically.</p>
-            </div>
-          </div>
-        </Card>
-      )}
       <Card>
-        <p className="text-[12px] uppercase tracking-wider text-white/50">New ticket</p>
+        <p className="text-[12px] uppercase tracking-wider text-white/50">
+          {isClient ? 'New ticket (expedited)' : 'Submit a ticket'}
+        </p>
+        {!isClient && (
+          <p className="mt-1 text-[12px] text-white/55">Not signed in — tell us how to reach you and what you need.</p>
+        )}
         <div className="mt-3 flex flex-col gap-3">
-          {!authedName && (
-            <label className="flex flex-col gap-1">
-              <span className="text-[11px] font-medium uppercase tracking-wider text-white/55">Client ID <span className="text-white/35">optional</span></span>
-              <input value={clientId} onChange={e => setClientId(e.target.value)} placeholder="e.g. CB-04821"
-                className="rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-[14px] outline-none focus:border-white/30" />
-            </label>
+          {!isClient && (
+            <>
+              <label className="flex flex-col gap-1">
+                <span className="text-[11px] font-medium uppercase tracking-wider text-white/55">Your name</span>
+                <input required value={contactName} onChange={e => setContactName(e.target.value)} placeholder="Jane Smith"
+                  className={supportFieldCls} />
+              </label>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <label className="flex flex-col gap-1">
+                  <span className="text-[11px] font-medium uppercase tracking-wider text-white/55">Email</span>
+                  <input type="email" value={contactEmail} onChange={e => setContactEmail(e.target.value)} placeholder="you@company.com"
+                    className={supportFieldCls} />
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className="text-[11px] font-medium uppercase tracking-wider text-white/55">Phone</span>
+                  <input type="tel" value={contactPhone} onChange={e => setContactPhone(e.target.value)} placeholder="(555) 123-4567"
+                    className={supportFieldCls} />
+                </label>
+              </div>
+              <p className="text-[11px] text-white/45">Provide email, phone, or both.</p>
+            </>
           )}
 
           <label className="flex flex-col gap-1">
-            <span className="text-[11px] font-medium uppercase tracking-wider text-white/55">Ticket title</span>
-            <input required value={title} onChange={e => setTitle(e.target.value)} placeholder="Short summary of the issue"
-              className="rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-[14px] outline-none focus:border-white/30" />
+            <span className="text-[11px] font-medium uppercase tracking-wider text-white/55">Subject</span>
+            <input required value={title} onChange={e => setTitle(e.target.value)}
+              placeholder={isClient ? 'Homepage hero needs updating' : 'Brief summary'}
+              className={supportFieldCls} />
           </label>
 
-          <div className="grid grid-cols-2 gap-2">
+          <div className={isClient ? 'grid grid-cols-2 gap-2' : ''}>
             <label className="flex flex-col gap-1">
               <span className="text-[11px] font-medium uppercase tracking-wider text-white/55">Category</span>
-              <select value={category} onChange={e => setCategory(e.target.value)}
-                className="rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-[14px] outline-none focus:border-white/30">
-                {supportCategories.map(c => <option key={c}>{c}</option>)}
+              <select value={category} onChange={e => setCategory(e.target.value)} className={supportFieldCls}>
+                {supportCategories.map(c => <option key={c} value={c}>{c}</option>)}
               </select>
             </label>
-            <label className="flex flex-col gap-1">
-              <span className="text-[11px] font-medium uppercase tracking-wider text-white/55">Priority</span>
-              <select value={priority} onChange={e => setPriority(e.target.value)}
-                className="rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-[14px] outline-none focus:border-white/30">
-                {supportPriorities.map(p => <option key={p}>{p}</option>)}
-              </select>
-            </label>
+            {isClient && (
+              <label className="flex flex-col gap-1">
+                <span className="text-[11px] font-medium uppercase tracking-wider text-white/55">Priority</span>
+                <select value={priority} onChange={e => setPriority(e.target.value)} className={supportFieldCls}>
+                  {supportPriorities.map(p => <option key={p} value={p}>{p}</option>)}
+                </select>
+              </label>
+            )}
           </div>
-
-          <div className="flex flex-col gap-1">
-            <span className="text-[11px] font-medium uppercase tracking-wider text-white/55">Follow up preference</span>
-            <div className="grid grid-cols-3 gap-1.5 rounded-xl bg-white/5 p-1">
-              {['Email','Phone','Text'].map(p => (
-                <button key={p} type="button" onClick={() => setPref(p)}
-                  className={'rounded-lg py-2 text-[12px] font-medium transition ' +
-                    (pref === p ? 'bg-white text-black' : 'text-white/75 hover:text-white')}>
-                  {p === 'Email' ? '✉️' : p === 'Phone' ? '📞' : '💬'} {p}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {needsEmail && (
-            <label className="flex flex-col gap-1">
-              <span className="text-[11px] font-medium uppercase tracking-wider text-white/55">Reply email</span>
-              <input required type="email" value={contactEmail} onChange={e => setContactEmail(e.target.value)} placeholder="you@email.com"
-                className="rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-[14px] outline-none focus:border-white/30" />
-            </label>
-          )}
-          {needsPhone && (
-            <label className="flex flex-col gap-1">
-              <span className="text-[11px] font-medium uppercase tracking-wider text-white/55">{pref === 'Text' ? 'Text-capable number' : 'Phone number'}</span>
-              <input required type="tel" value={contactPhone} onChange={e => setContactPhone(e.target.value)} placeholder="(555) 123-4567"
-                className="rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-[14px] outline-none focus:border-white/30" />
-            </label>
-          )}
 
           <label className="flex flex-col gap-1">
-            <span className="text-[11px] font-medium uppercase tracking-wider text-white/55">Describe the issue</span>
-            <textarea required rows="5" value={description} onChange={e => setDescription(e.target.value)} placeholder="What happened, what you expected, and any steps to reproduce…"
-              className="resize-none rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-[14px] outline-none focus:border-white/30" />
+            <span className="text-[11px] font-medium uppercase tracking-wider text-white/55">Description</span>
+            <textarea required rows={5} value={description} onChange={e => setDescription(e.target.value)}
+              placeholder="What do you need changed or fixed? Include URLs, steps to reproduce, or screenshots if helpful…"
+              className={'resize-none ' + supportFieldCls} />
           </label>
 
-          <div className="flex gap-2 pt-1">
-            <button type="button" onClick={onBack} className="flex-1 rounded-2xl border border-white/15 py-3 text-[14px] font-semibold text-white/80">Cancel</button>
-            <button type="submit" disabled={submitting} className="flex-[2] rounded-2xl bg-white py-3 text-[14px] font-semibold text-black active:scale-[0.98] disabled:opacity-60">
-              {submitting ? 'Sending…' : 'Submit ticket'}
-            </button>
-          </div>
+          <button type="submit" disabled={submitting}
+            className="w-full rounded-2xl bg-white py-3.5 text-[14px] font-semibold text-black active:scale-[0.98] disabled:opacity-60">
+            {submitting ? 'Submitting…' : 'Submit ticket'}
+          </button>
           {submitErr && <p className="text-[12px] text-rose-300">{submitErr}</p>}
         </div>
       </Card>
@@ -1715,8 +1658,100 @@ function SupportTicketForm({ authedName, onBack, onSubmitted }) {
   );
 }
 
-function SupportSubmitted({ onDone }) {
-  const ticketId = useMemo(() => 'CB-' + Math.floor(10000 + Math.random() * 89999), []);
+function SupportMyTickets() {
+  const [tickets, setTickets] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [expanded, setExpanded] = useState(null);
+  const [thread, setThread] = useState(null);
+  const [reply, setReply] = useState('');
+  const [replyErr, setReplyErr] = useState(null);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    api('/tickets')
+      .then(r => setTickets(r.tickets || []))
+      .catch(() => setTickets([]))
+      .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const openTicket = async (id) => {
+    if (expanded === id) { setExpanded(null); setThread(null); return; }
+    setExpanded(id);
+    setThread(null);
+    try {
+      const r = await api('/tickets/' + id);
+      setThread(r);
+    } catch {
+      setThread(null);
+    }
+  };
+
+  const sendReply = async () => {
+    if (!reply.trim() || !expanded) return;
+    setReplyErr(null);
+    try {
+      await api('/tickets/' + expanded + '/messages', { method: 'POST', body: { body: reply.trim() } });
+      setReply('');
+      const r = await api('/tickets/' + expanded);
+      setThread(r);
+      load();
+    } catch (ex) {
+      setReplyErr(ex.message || 'Failed to send');
+    }
+  };
+
+  if (loading) return <Card><p className="text-[13px] text-white/60">Loading your tickets…</p></Card>;
+  if (!tickets.length) return null;
+
+  return (
+    <Card>
+      <p className="text-[12px] uppercase tracking-wider text-white/50">Your tickets</p>
+      <ul className="mt-3 flex flex-col gap-2">
+        {tickets.map(t => (
+          <li key={t.id} className="rounded-xl border border-white/10 bg-white/[0.04] overflow-hidden">
+            <button type="button" onClick={() => openTicket(t.id)}
+              className="flex w-full items-start justify-between gap-2 px-3 py-3 text-left">
+              <div className="min-w-0">
+                <p className="truncate text-[13px] font-semibold">{t.subject}</p>
+                <p className="mt-0.5 text-[11px] text-white/55">{t.category} · #{t.id}</p>
+              </div>
+              <span className={'shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium uppercase ' +
+                (t.status === 'open' ? 'bg-emerald-500/20 text-emerald-300' : t.status === 'pending' ? 'bg-amber-500/20 text-amber-200' : 'bg-white/10 text-white/60')}>
+                {t.status}
+              </span>
+            </button>
+            {expanded === t.id && thread && (
+              <div className="border-t border-white/10 px-3 py-3">
+                <div className="max-h-40 space-y-2 overflow-y-auto">
+                  {thread.messages.map(m => (
+                    <div key={m.id} className={'rounded-lg px-2.5 py-2 text-[12px] ' + (m.sender === 'staff' ? 'bg-sky-500/15 text-sky-100' : 'bg-white/5 text-white/85')}>
+                      <span className="text-[10px] uppercase text-white/45">{m.sender}</span>
+                      <p className="mt-0.5 whitespace-pre-wrap">{m.body}</p>
+                    </div>
+                  ))}
+                </div>
+                {t.status !== 'closed' && (
+                  <div className="mt-3 flex gap-2">
+                    <input value={reply} onChange={e => setReply(e.target.value)} placeholder="Add a reply…"
+                      className={'flex-1 ' + supportFieldCls} />
+                    <button type="button" onClick={sendReply}
+                      className="shrink-0 rounded-xl bg-white/15 px-3 text-[12px] font-semibold text-white hover:bg-white/25">Send</button>
+                  </div>
+                )}
+                {replyErr && <p className="mt-1 text-[11px] text-rose-300">{replyErr}</p>}
+              </div>
+            )}
+          </li>
+        ))}
+      </ul>
+    </Card>
+  );
+}
+
+function SupportSubmitted({ ticket, onDone }) {
+  const ref = ticket?.id ? `CB-${ticket.id}` : '—';
   return (
     <Card>
       <div className="flex flex-col items-center gap-3 px-4 py-2 text-center">
@@ -1724,10 +1759,14 @@ function SupportSubmitted({ onDone }) {
           <svg viewBox="0 0 24 24" className="h-7 w-7" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12l5 5L20 7"/></svg>
         </div>
         <p className="text-[18px] font-semibold">Ticket submitted</p>
-        <p className="text-[12px] text-white/60">Reference</p>
-        <p className="-mt-1 rounded-lg bg-white/10 px-3 py-1 font-mono text-[14px] text-white">{ticketId}</p>
-        <p className="max-w-xs text-[13px] text-white/65">A confirmation has been sent. We’ll be in touch via your chosen method.</p>
-        <button onClick={onDone} className="mt-2 rounded-full bg-white/10 px-4 py-2 text-[13px] font-medium text-white hover:bg-white/20">Back to support</button>
+        <p className="text-[12px] text-white/60">Reference number</p>
+        <p className="-mt-1 rounded-lg bg-white/10 px-3 py-1 font-mono text-[14px] text-white">{ref}</p>
+        <p className="max-w-xs text-[13px] text-white/65">
+          We saved your request to our support queue. {ticket?.contactEmail || ticket?.email ? 'We’ll follow up by email.' : 'We’ll be in touch soon.'}
+        </p>
+        <button type="button" onClick={onDone} className="mt-2 rounded-full bg-white/10 px-4 py-2 text-[13px] font-medium text-white hover:bg-white/20">
+          Submit another ticket
+        </button>
       </div>
     </Card>
   );
