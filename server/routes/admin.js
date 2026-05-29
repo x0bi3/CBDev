@@ -1,9 +1,24 @@
 import { Router } from 'express';
 import { query } from '../db.js';
 import { requireAdmin } from '../auth.js';
+import { productImageUpload } from '../lib/uploads.js';
 
 const router = Router();
 router.use(requireAdmin);
+
+router.post('/uploads/product-image', (req, res) => {
+  productImageUpload.single('image')(req, res, (err) => {
+    if (err) {
+      res.status(400).json({ error: err.message || 'Upload failed' });
+      return;
+    }
+    if (!req.file) {
+      res.status(400).json({ error: 'No image file provided' });
+      return;
+    }
+    res.status(201).json({ url: `/uploads/products/${req.file.filename}` });
+  });
+});
 
 function slugify(text) {
   return String(text).toLowerCase().trim()
@@ -31,7 +46,8 @@ router.get('/stats', async (_req, res) => {
 /* ---------- Products ---------- */
 router.get('/products', async (_req, res) => {
   const { rows } = await query(
-    `SELECT id, slug, name, category_slug, price_cents, description, color, images, variants, active, sort_order
+    `SELECT id, slug, name, category_slug, price_cents, description, color, images, variants,
+            active, sort_order, stock_quantity, track_inventory, sku
      FROM products ORDER BY sort_order, id`,
   );
   res.json({ products: rows });
@@ -41,11 +57,13 @@ router.post('/products', async (req, res) => {
   const b = req.body;
   const slug = b.slug || slugify(b.name);
   const { rows } = await query(
-    `INSERT INTO products (slug, name, category_slug, price_cents, description, color, images, variants, active, sort_order)
-     VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9,$10) RETURNING *`,
+    `INSERT INTO products (slug, name, category_slug, price_cents, description, color, images, variants,
+      active, sort_order, stock_quantity, track_inventory, sku)
+     VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9,$10,$11,$12,$13) RETURNING *`,
     [slug, b.name, b.category_slug || b.cat || 'apparel', b.price_cents ?? (b.price * 100), b.description || '',
       b.color || 'from-indigo-500 to-violet-700', JSON.stringify(b.images || []), JSON.stringify(b.variants || {}),
-      b.active !== false, b.sort_order ?? 0],
+      b.active !== false, b.sort_order ?? 0, Math.max(0, Number(b.stock_quantity) || 0),
+      !!b.track_inventory, b.sku || null],
   );
   res.status(201).json({ product: rows[0] });
 });
@@ -54,9 +72,11 @@ router.put('/products/:id', async (req, res) => {
   const b = req.body;
   const { rows } = await query(
     `UPDATE products SET slug=$1, name=$2, category_slug=$3, price_cents=$4, description=$5, color=$6,
-      images=$7::jsonb, variants=$8::jsonb, active=$9, sort_order=$10 WHERE id=$11 RETURNING *`,
+      images=$7::jsonb, variants=$8::jsonb, active=$9, sort_order=$10, stock_quantity=$11, track_inventory=$12, sku=$13
+     WHERE id=$14 RETURNING *`,
     [b.slug, b.name, b.category_slug, b.price_cents, b.description, b.color,
-      JSON.stringify(b.images || []), JSON.stringify(b.variants || {}), b.active !== false, b.sort_order ?? 0, req.params.id],
+      JSON.stringify(b.images || []), JSON.stringify(b.variants || {}), b.active !== false, b.sort_order ?? 0,
+      Math.max(0, Number(b.stock_quantity) || 0), !!b.track_inventory, b.sku || null, req.params.id],
   );
   if (!rows[0]) { res.status(404).json({ error: 'Not found' }); return; }
   res.json({ product: rows[0] });

@@ -1,0 +1,5 @@
+-- Merch product inventory + optional SKU
+ALTER TABLE products
+  ADD COLUMN IF NOT EXISTS stock_quantity INTEGER NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS track_inventory BOOLEAN NOT NULL DEFAULT FALSE,
+  ADD COLUMN IF NOT EXISTS sku TEXT;

@@ -17,6 +17,10 @@ function mapProduct(row) {
     description: row.description,
     variants: row.variants || {},
     images: row.images || [],
+    stockQuantity: row.stock_quantity ?? 0,
+    trackInventory: !!row.track_inventory,
+    sku: row.sku || '',
+    inStock: !row.track_inventory || (row.stock_quantity ?? 0) > 0,
   };
 }
 
@@ -35,7 +39,8 @@ router.get('/categories', async (_req, res) => {
 router.get('/', async (_req, res) => {
   try {
     const { rows } = await query(
-      `SELECT slug, name, category_slug, price_cents, description, color, images, variants
+      `SELECT slug, name, category_slug, price_cents, description, color, images, variants,
+              stock_quantity, track_inventory, sku
        FROM products WHERE active = TRUE ORDER BY sort_order, id`,
     );
     res.json({ products: rows.map(mapProduct) });
@@ -48,7 +53,8 @@ router.get('/', async (_req, res) => {
 router.get('/:slug', async (req, res) => {
   try {
     const { rows } = await query(
-      `SELECT slug, name, category_slug, price_cents, description, color, images, variants
+      `SELECT slug, name, category_slug, price_cents, description, color, images, variants,
+              stock_quantity, track_inventory, sku
        FROM products WHERE slug = $1 AND active = TRUE`,
       [req.params.slug],
     );

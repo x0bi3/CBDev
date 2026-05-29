@@ -2,4 +2,32 @@
 @tailwind components;
 @tailwind utilities;
 
-body { margin: 0; min-height: 100vh; }
+@layer base {
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: #0c1220;
+    color: #f1f5f9;
+  }
+
+  #root input,
+  #root textarea,
+  #root select {
+    color: #f8fafc;
+    background-color: #1e293b;
+    border-color: #64748b;
+  }
+
+  #root input::placeholder,
+  #root textarea::placeholder {
+    color: #94a3b8;
+  }
+
+  #root input:focus,
+  #root textarea:focus,
+  #root select:focus {
+    outline: none;
+    border-color: #818cf8;
+    box-shadow: 0 0 0 2px rgba(129, 140, 248, 0.35);
+  }
+}

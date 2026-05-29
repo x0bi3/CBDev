@@ -78,11 +78,76 @@ function Table({ columns, rows, onEdit, onDelete }) {
 }
 
 function Field({ label, children }) {
-  return <label className="block"><span className="text-xs font-medium text-slate-400">{label}</span><div className="mt-1">{children}</div></label>;
+  return <label className="block"><span className="text-xs font-medium text-slate-300">{label}</span><div className="mt-1">{children}</div></label>;
 }
 
 function inputCls(extra = '') {
-  return 'w-full rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-sm ' + extra;
+  return 'w-full rounded-lg border border-slate-500 bg-slate-800 px-3 py-2 text-sm text-slate-50 placeholder:text-slate-400 ' + extra;
+}
+
+function modalPanelCls() {
+  return 'max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-slate-500 bg-slate-800 p-6 text-slate-100 shadow-2xl';
+}
+
+async function uploadProductImage(file) {
+  const token = localStorage.getItem(TOKEN_KEY);
+  const fd = new FormData();
+  fd.append('image', file);
+  const res = await fetch('/api/admin/uploads/product-image', {
+    method: 'POST',
+    headers: token ? { Authorization: 'Bearer ' + token } : {},
+    body: fd,
+  });
+  let data = {};
+  try { data = await res.json(); } catch (_) {}
+  if (!res.ok) throw new Error(data.error || 'Upload failed');
+  return data.url;
+}
+
+function ProductImagesEditor({ images, onImagesChange }) {
+  const [uploading, setUploading] = useState(false);
+  const [err, setErr] = useState('');
+  const list = Array.isArray(images) ? images : [];
+
+  const onPick = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setErr('');
+    setUploading(true);
+    try {
+      const url = await uploadProductImage(file);
+      onImagesChange([...list, url]);
+    } catch (ex) {
+      setErr(ex.message);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap gap-2">
+        {list.map((src, i) => (
+          <div key={i} className="relative h-20 w-20 overflow-hidden rounded-lg border border-slate-500 bg-slate-900">
+            {src.startsWith('/') || src.startsWith('http') ? (
+              <img src={src} alt="" className="h-full w-full object-cover" />
+            ) : (
+              <div className={'h-full w-full bg-gradient-to-br ' + src} title="Gradient placeholder" />
+            )}
+            <button type="button" onClick={() => onImagesChange(list.filter((_, j) => j !== i))}
+              className="absolute right-0.5 top-0.5 rounded bg-black/70 px-1 text-xs text-white hover:bg-rose-600">×</button>
+          </div>
+        ))}
+        <label className="flex h-20 w-20 cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-slate-500 bg-slate-900/80 text-center text-[10px] text-slate-300 hover:border-indigo-400 hover:text-white">
+          {uploading ? '…' : '+ Upload'}
+          <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" className="hidden" onChange={onPick} disabled={uploading} />
+        </label>
+      </div>
+      <p className="text-xs text-slate-400">Upload product photos (JPEG, PNG, WebP, or GIF, up to 8MB).</p>
+      {err && <p className="text-xs text-rose-400">{err}</p>}
+    </div>
+  );
 }
 
 function ProductsSection() {
@@ -90,31 +155,101 @@ function ProductsSection() {
   const [edit, setEdit] = useState(null);
   const load = () => api('/admin/products').then(r => setRows(r.products));
   useEffect(() => { load(); }, []);
+
+  const openEdit = (row) => {
+    if (!row) {
+      setEdit({
+        name: '', category_slug: 'apparel', price_cents: 0, color: 'from-indigo-500 to-violet-700',
+        description: '', images: [], variantsJson: '{}', active: true, track_inventory: false, stock_quantity: 0, sku: '',
+      });
+      return;
+    }
+    setEdit({
+      ...row,
+      images: Array.isArray(row.images) ? [...row.images] : [],
+      variantsJson: JSON.stringify(row.variants || {}, null, 2),
+      stock_quantity: row.stock_quantity ?? 0,
+      track_inventory: !!row.track_inventory,
+    });
+  };
+
   const save = async () => {
-    const body = { ...edit, price_cents: Math.round(Number(edit.price_cents || edit.price * 100)), images: JSON.parse(edit.imagesJson || '[]'), variants: JSON.parse(edit.variantsJson || '{}') };
+    let variants = {};
+    try { variants = JSON.parse(edit.variantsJson || '{}'); } catch { alert('Variants must be valid JSON'); return; }
+    const body = {
+      ...edit,
+      price_cents: Math.round(Number(edit.price_cents) || 0),
+      images: edit.images || [],
+      variants,
+      stock_quantity: Math.max(0, Number(edit.stock_quantity) || 0),
+      track_inventory: !!edit.track_inventory,
+    };
+    delete body.variantsJson;
     if (edit.id) await api('/admin/products/' + edit.id, { method: 'PUT', body });
     else await api('/admin/products', { method: 'POST', body });
-    setEdit(null); load();
+    setEdit(null);
+    load();
   };
+
+  const stockLabel = (r) => {
+    if (!r.track_inventory) return '—';
+    const n = r.stock_quantity ?? 0;
+    return n <= 0 ? 'Out of stock' : String(n);
+  };
+
   return (
     <div>
-      <div className="mb-4 flex items-center justify-between"><h2 className="text-xl font-semibold">Products</h2><Btn onClick={() => setEdit({ name:'', category_slug:'apparel', price_cents:0, imagesJson:'[]', variantsJson:'{}', active:true })}>Add product</Btn></div>
-      <Table columns={[{key:'name',label:'Name'},{key:'category_slug',label:'Category'},{key:'price_cents',label:'Price ¢',render:r=>'£'+(r.price_cents/100).toFixed(0)},{key:'active',label:'Active',render:r=>r.active?'Yes':'No'}]} rows={rows} onEdit={r=>setEdit({...r,imagesJson:JSON.stringify(r.images||[],null,2),variantsJson:JSON.stringify(r.variants||{},null,2)})} onDelete={async r=>{if(confirm('Delete?')){await api('/admin/products/'+r.id,{method:'DELETE'});load();}}} />
+      <div className="mb-4 flex items-center justify-between">
+        <h2 className="text-xl font-semibold text-white">Products</h2>
+        <Btn onClick={() => openEdit(null)}>Add product</Btn>
+      </div>
+      <Table
+        columns={[
+          { key: 'name', label: 'Name' },
+          { key: 'category_slug', label: 'Category' },
+          { key: 'price_cents', label: 'Price', render: r => '£' + (r.price_cents / 100).toFixed(2) },
+          { key: 'stock', label: 'Stock', render: stockLabel },
+          { key: 'active', label: 'Active', render: r => r.active ? 'Yes' : 'No' },
+        ]}
+        rows={rows}
+        onEdit={openEdit}
+        onDelete={async r => { if (confirm('Delete?')) { await api('/admin/products/' + r.id, { method: 'DELETE' }); load(); } }}
+      />
       {edit && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => setEdit(null)}>
-          <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-slate-600 bg-slate-900 p-6" onClick={e=>e.stopPropagation()}>
-            <h3 className="text-lg font-semibold">{edit.id?'Edit':'New'} product</h3>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4" onClick={() => setEdit(null)}>
+          <div className={modalPanelCls()} onClick={e => e.stopPropagation()}>
+            <h3 className="text-lg font-semibold text-white">{edit.id ? 'Edit' : 'New'} product</h3>
             <div className="mt-4 grid gap-3">
-              <Field label="Name"><input className={inputCls()} value={edit.name||''} onChange={e=>setEdit({...edit,name:e.target.value})} /></Field>
-              <Field label="Slug"><input className={inputCls()} value={edit.slug||''} onChange={e=>setEdit({...edit,slug:e.target.value})} /></Field>
-              <Field label="Category slug"><input className={inputCls()} value={edit.category_slug||''} onChange={e=>setEdit({...edit,category_slug:e.target.value})} /></Field>
-              <Field label="Price (cents)"><input type="number" className={inputCls()} value={edit.price_cents||0} onChange={e=>setEdit({...edit,price_cents:Number(e.target.value)})} /></Field>
-              <Field label="Color gradient"><input className={inputCls()} value={edit.color||''} onChange={e=>setEdit({...edit,color:e.target.value})} /></Field>
-              <Field label="Description"><textarea className={inputCls()} rows={3} value={edit.description||''} onChange={e=>setEdit({...edit,description:e.target.value})} /></Field>
-              <Field label="Images JSON"><textarea className={inputCls('font-mono text-xs')} rows={3} value={edit.imagesJson||'[]'} onChange={e=>setEdit({...edit,imagesJson:e.target.value})} /></Field>
-              <Field label="Variants JSON"><textarea className={inputCls('font-mono text-xs')} rows={3} value={edit.variantsJson||'{}'} onChange={e=>setEdit({...edit,variantsJson:e.target.value})} /></Field>
+              <Field label="Name"><input className={inputCls()} value={edit.name || ''} onChange={e => setEdit({ ...edit, name: e.target.value })} /></Field>
+              <Field label="Slug"><input className={inputCls()} value={edit.slug || ''} onChange={e => setEdit({ ...edit, slug: e.target.value })} /></Field>
+              <Field label="SKU (optional)"><input className={inputCls()} value={edit.sku || ''} onChange={e => setEdit({ ...edit, sku: e.target.value })} /></Field>
+              <Field label="Category slug"><input className={inputCls()} value={edit.category_slug || ''} onChange={e => setEdit({ ...edit, category_slug: e.target.value })} /></Field>
+              <Field label="Price (pence)"><input type="number" className={inputCls()} value={edit.price_cents || 0} onChange={e => setEdit({ ...edit, price_cents: Number(e.target.value) })} /></Field>
+              <Field label="Fallback color gradient (no photo)"><input className={inputCls()} value={edit.color || ''} onChange={e => setEdit({ ...edit, color: e.target.value })} placeholder="from-rose-500 to-red-800" /></Field>
+              <Field label="Description"><textarea className={inputCls()} rows={3} value={edit.description || ''} onChange={e => setEdit({ ...edit, description: e.target.value })} /></Field>
+              <Field label="Product images">
+                <ProductImagesEditor images={edit.images} onImagesChange={imgs => setEdit({ ...edit, images: imgs })} />
+              </Field>
+              <div className="rounded-lg border border-slate-500 bg-slate-900/60 p-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">Inventory</p>
+                <label className="mt-2 flex items-center gap-2 text-sm text-slate-200">
+                  <input type="checkbox" checked={!!edit.track_inventory} onChange={e => setEdit({ ...edit, track_inventory: e.target.checked })} />
+                  Track stock for this product
+                </label>
+                {edit.track_inventory && (
+                  <Field label="Quantity in stock">
+                    <input type="number" min={0} className={inputCls()} value={edit.stock_quantity ?? 0}
+                      onChange={e => setEdit({ ...edit, stock_quantity: Math.max(0, Number(e.target.value)) })} />
+                  </Field>
+                )}
+              </div>
+              <Field label="Variants JSON (sizes, colors)"><textarea className={inputCls('font-mono text-xs')} rows={4} value={edit.variantsJson || '{}'} onChange={e => setEdit({ ...edit, variantsJson: e.target.value })} /></Field>
+              <label className="flex items-center gap-2 text-sm text-slate-200">
+                <input type="checkbox" checked={edit.active !== false} onChange={e => setEdit({ ...edit, active: e.target.checked })} />
+                Active (visible in Merch store)
+              </label>
             </div>
-            <div className="mt-6 flex gap-2"><Btn onClick={save}>Save</Btn><Btn variant="ghost" onClick={()=>setEdit(null)}>Cancel</Btn></div>
+            <div className="mt-6 flex gap-2"><Btn onClick={save}>Save</Btn><Btn variant="ghost" onClick={() => setEdit(null)}>Cancel</Btn></div>
           </div>
         </div>
       )}
@@ -455,9 +590,9 @@ function AdminApp({ user, onLogout }) {
 
   return (
     <div className="flex min-h-screen">
-      <aside className="w-56 shrink-0 border-r border-slate-800 bg-slate-900 p-4">
-        <p className="text-xs font-semibold uppercase tracking-wider text-indigo-400">CreativeBuilds</p>
-        <p className="mt-1 truncate text-sm text-slate-400">{user.email}</p>
+      <aside className="w-56 shrink-0 border-r border-slate-600 bg-slate-900 p-4">
+        <p className="text-xs font-semibold uppercase tracking-wider text-indigo-300">CreativeBuilds</p>
+        <p className="mt-1 truncate text-sm text-slate-300">{user.email}</p>
         <nav className="mt-6 space-y-1">
           {NAV.map(([id, label]) => (
             <button key={id} type="button" onClick={() => setSection(id)}
@@ -468,7 +603,7 @@ function AdminApp({ user, onLogout }) {
         </nav>
         <button type="button" onClick={onLogout} className="mt-8 text-sm text-slate-500 hover:text-white">Sign out</button>
       </aside>
-      <main className="flex-1 overflow-auto p-8">{content[section]}</main>
+      <main className="flex-1 overflow-auto bg-slate-950 p-8 text-slate-100">{content[section]}</main>
     </div>
   );
 }

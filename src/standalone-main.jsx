@@ -839,6 +839,19 @@ const merch = [
     variants:{},
     images:['from-pink-400 to-purple-700','from-fuchsia-400 to-pink-700','from-rose-400 to-fuchsia-700'] },
 ];
+function isProductImageUrl(src) {
+  return src && (src.startsWith('/') || src.startsWith('http://') || src.startsWith('https://'));
+}
+
+function ProductVisual({ product, imageIndex = 0, className = 'aspect-square' }) {
+  const img = product.images?.[imageIndex];
+  if (isProductImageUrl(img)) {
+    return <img src={img} alt="" className={className + ' w-full object-cover'} />;
+  }
+  const grad = img || product.color || 'from-slate-500 to-slate-800';
+  return <div className={className + ' w-full bg-gradient-to-br ' + grad} />;
+}
+
 function MerchApp() {
   const [cat, setCat] = useState('all');
   const [q, setQ] = useState('');
@@ -867,17 +880,34 @@ function MerchApp() {
   const cartTotal = cart.reduce((a,b) => a + b.price * b.qty, 0);
 
   const addToCart = (product, variantPicks) => {
+    if (product.trackInventory && (product.stockQuantity ?? 0) <= 0) return;
     const variantLabel = Object.entries(variantPicks).map(([k,v]) => `${k}: ${v}`).join(' · ');
     setCart(prev => {
       const key = product.id + '|' + variantLabel;
       const existing = prev.find(c => c.key === key);
-      if (existing) return prev.map(c => c.key === key ? { ...c, qty:c.qty + 1 } : c);
-      return [...prev, { key, id:product.id, name:product.name, price:product.price, variant:variantLabel, qty:1, color:product.color }];
+      const inCart = prev.filter(c => c.id === product.id).reduce((a, c) => a + c.qty, 0);
+      if (product.trackInventory && inCart >= (product.stockQuantity ?? 0)) return prev;
+      if (existing) {
+        if (product.trackInventory && inCart >= (product.stockQuantity ?? 0)) return prev;
+        return prev.map(c => c.key === key ? { ...c, qty: c.qty + 1 } : c);
+      }
+      return [...prev, {
+        key, id: product.id, name: product.name, price: product.price, variant: variantLabel, qty: 1,
+        color: product.color, trackInventory: product.trackInventory, stockQuantity: product.stockQuantity,
+      }];
     });
     setCartOpen(true);
   };
   const removeFromCart = (key) => setCart(prev => prev.filter(c => c.key !== key));
-  const setQty = (key, delta) => setCart(prev => prev.map(c => c.key === key ? { ...c, qty:c.qty + delta } : c).filter(c => c.qty > 0));
+  const setQty = (key, delta) => setCart(prev => {
+    const item = prev.find(c => c.key === key);
+    if (!item) return prev;
+    if (delta > 0 && item.trackInventory) {
+      const inCart = prev.filter(c => c.id === item.id).reduce((a, c) => a + c.qty, 0);
+      if (inCart >= (item.stockQuantity ?? 0)) return prev;
+    }
+    return prev.map(c => c.key === key ? { ...c, qty: c.qty + delta } : c).filter(c => c.qty > 0);
+  });
 
   return (
     <>
@@ -934,30 +964,42 @@ function MerchApp() {
             ) : (
               <div className="grid grid-cols-2 gap-3">
                 {filtered.map(m => {
-                  const variantGroups = Object.values(m.variants);
+                  const variantGroups = Object.values(m.variants || {});
                   const hasChoice = variantGroups.some(opts => opts.length > 1);
+                  const outOfStock = m.trackInventory && (m.stockQuantity ?? 0) <= 0;
+                  const lowStock = m.trackInventory && !outOfStock && (m.stockQuantity ?? 0) <= 5;
                   const quickBuy = (e) => {
                     e.stopPropagation();
+                    if (outOfStock) return;
                     if (hasChoice) { setSelected(m); return; }
                     const picks = {};
-                    Object.entries(m.variants).forEach(([k,v]) => { picks[k] = v[0]; });
+                    Object.entries(m.variants || {}).forEach(([k, v]) => { picks[k] = v[0]; });
                     addToCart(m, picks);
                   };
                   return (
                     <div key={m.id} role="button" tabIndex={0}
                       onClick={() => setSelected(m)}
                       onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelected(m); } }}
-                      className="cursor-pointer text-left overflow-hidden rounded-2xl border border-white/10 bg-white/[0.06] backdrop-blur-md transition hover:border-white/25 active:scale-[0.98]">
-                      <div className={'aspect-square bg-gradient-to-br ' + m.color} />
+                      className={'cursor-pointer text-left overflow-hidden rounded-2xl border border-white/10 bg-white/[0.06] backdrop-blur-md transition hover:border-white/25 active:scale-[0.98] ' + (outOfStock ? 'opacity-60' : '')}>
+                      <div className="relative aspect-square overflow-hidden">
+                        <ProductVisual product={m} className="h-full" />
+                        {outOfStock && (
+                          <span className="absolute inset-0 grid place-items-center bg-black/50 text-[12px] font-semibold uppercase tracking-wide">Sold out</span>
+                        )}
+                        {lowStock && !outOfStock && (
+                          <span className="absolute bottom-2 left-2 rounded-full bg-amber-500/90 px-2 py-0.5 text-[10px] font-semibold text-black">{m.stockQuantity} left</span>
+                        )}
+                      </div>
                       <div className="flex items-center justify-between gap-2 p-3">
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-[13px] font-semibold leading-tight">{m.name}</p>
                           <p className="mt-0.5 text-[12px] text-white/60">£{m.price}</p>
                         </div>
-                        <button onClick={quickBuy}
-                          title={hasChoice ? 'Select options' : 'Add to cart'}
-                          className="shrink-0 rounded-full bg-white px-3 py-1 text-[12px] font-semibold text-black transition hover:bg-white/90 active:scale-95">
-                          {hasChoice ? 'Options' : 'Buy'}
+                        <button onClick={quickBuy} disabled={outOfStock}
+                          title={outOfStock ? 'Out of stock' : hasChoice ? 'Select options' : 'Add to cart'}
+                          className={'shrink-0 rounded-full px-3 py-1 text-[12px] font-semibold transition active:scale-95 ' +
+                            (outOfStock ? 'bg-white/20 text-white/50' : 'bg-white text-black hover:bg-white/90')}>
+                          {outOfStock ? 'Sold out' : hasChoice ? 'Options' : 'Buy'}
                         </button>
                       </div>
                     </div>
@@ -986,29 +1028,47 @@ function MerchApp() {
 function ProductDetail({ product, onAdd }) {
   const [picks, setPicks] = useState(() => {
     const out = {};
-    Object.entries(product.variants).forEach(([k,v]) => { out[k] = v[0]; });
+    Object.entries(product.variants || {}).forEach(([k, v]) => { out[k] = v[0]; });
     return out;
   });
+  const thumbs = (product.images?.length ? product.images : [product.color || 'from-slate-500 to-slate-800']);
   const [activeImg, setActiveImg] = useState(0);
+  const outOfStock = product.trackInventory && (product.stockQuantity ?? 0) <= 0;
+
   return (
     <div className="mx-auto max-w-2xl px-5">
       <div className="flex flex-col gap-4 sm:flex-row">
         <div className="sm:w-1/2">
-          <div className={'aspect-square overflow-hidden rounded-3xl bg-gradient-to-br ' + product.images[activeImg]} />
-          <div className="mt-3 flex gap-2">
-            {product.images.map((img, i) => (
-              <button key={i} onClick={() => setActiveImg(i)}
-                className={'aspect-square w-16 rounded-xl bg-gradient-to-br ' + img + ' ' + (i === activeImg ? 'ring-2 ring-white' : 'ring-1 ring-white/15')} />
-            ))}
+          <div className="aspect-square overflow-hidden rounded-3xl">
+            <ProductVisual product={{ ...product, images: thumbs }} imageIndex={activeImg} className="h-full min-h-full" />
           </div>
+          {thumbs.length > 1 && (
+            <div className="mt-3 flex gap-2">
+              {thumbs.map((img, i) => (
+                <button key={i} type="button" onClick={() => setActiveImg(i)}
+                  className={'aspect-square w-16 overflow-hidden rounded-xl ' + (i === activeImg ? 'ring-2 ring-white' : 'ring-1 ring-white/15')}>
+                  {isProductImageUrl(img) ? (
+                    <img src={img} alt="" className="h-full w-full object-cover" />
+                  ) : (
+                    <div className={'h-full w-full bg-gradient-to-br ' + img} />
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
         <div className="sm:w-1/2 sm:pl-2">
           <h2 className="text-[26px] font-bold leading-tight">{product.name}</h2>
           <p className="mt-1 text-[20px] font-semibold text-white/90">£{product.price}</p>
+          {product.trackInventory && (
+            <p className={'mt-1 text-[13px] font-medium ' + (outOfStock ? 'text-rose-300' : 'text-emerald-300')}>
+              {outOfStock ? 'Out of stock' : `${product.stockQuantity} in stock`}
+            </p>
+          )}
           <p className="mt-3 text-[14px] leading-relaxed text-white/75">{product.description}</p>
 
           <div className="mt-5 flex flex-col gap-4">
-            {Object.entries(product.variants).map(([key, options]) => (
+            {Object.entries(product.variants || {}).map(([key, options]) => (
               <div key={key}>
                 <p className="mb-2 text-[12px] uppercase tracking-wider text-white/55">{key}</p>
                 <div className="flex flex-wrap gap-1.5">
@@ -1024,9 +1084,10 @@ function ProductDetail({ product, onAdd }) {
             ))}
           </div>
 
-          <button onClick={() => onAdd(picks)}
-            className="mt-6 block w-full rounded-2xl bg-white py-3.5 text-[15px] font-semibold text-black transition active:scale-[0.98]">
-            Add to cart · £{product.price}
+          <button type="button" onClick={() => onAdd(picks)} disabled={outOfStock}
+            className={'mt-6 block w-full rounded-2xl py-3.5 text-[15px] font-semibold transition active:scale-[0.98] ' +
+              (outOfStock ? 'bg-white/20 text-white/50' : 'bg-white text-black')}>
+            {outOfStock ? 'Out of stock' : `Add to cart · £${product.price}`}
           </button>
         </div>
       </div>
@@ -3119,10 +3180,10 @@ function MiniPlayer() {
 
 /* ========================= DEVICE ROOT ========================= */
 function Device() {
-  const { themeId, openAppId, shellAppId, closeApp, handleShellExitComplete, audioRef } = useDevice();
+  const { themeId, openAppId, shellAppId, closeApp, handleShellExitComplete, audioRef, findApp: resolveApp } = useDevice();
   const theme = themes[themeId];
 
-  const shellApp = shellAppId ? getApp(shellAppId) : null;
+  const shellApp = shellAppId ? resolveApp(shellAppId) : null;
   const isShellOpen = !!openAppId && openAppId === shellAppId;
 
   return (

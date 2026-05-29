@@ -12,11 +12,13 @@ import calendarRoutes from './routes/calendar.js';
 import homeRoutes from './routes/home.js';
 import adminRoutes from './routes/admin.js';
 import { pool } from './db.js';
+import { ensureUploadDirs } from './lib/uploads.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, '..');
 const distDir = resolve(root, 'dist');
 const adminDist = resolve(distDir, 'admin');
+const uploadsDir = resolve(root, 'uploads');
 const envPath = resolve(root, '.env');
 
 function loadEnv() {
@@ -37,6 +39,7 @@ function loadEnv() {
 }
 
 loadEnv();
+ensureUploadDirs();
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3020;
@@ -47,6 +50,7 @@ function isAdminHost(req) {
 }
 
 app.use(express.json({ limit: '2mb' }));
+app.use('/uploads', express.static(uploadsDir, { maxAge: '7d' }));
 
 app.get('/api/health', async (_req, res) => {
   try {
