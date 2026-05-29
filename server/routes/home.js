@@ -6,7 +6,7 @@ const router = Router();
 router.get('/apps', async (_req, res) => {
   try {
     const { rows } = await query(
-      `SELECT app_id, label, glyph, tile, screen, portfolio_slug, sort_order
+      `SELECT app_id, label, glyph, tile, screen, portfolio_slug, sort_order, requires_auth
        FROM home_apps WHERE active = TRUE ORDER BY screen, sort_order, id`,
     );
     const home = rows.filter((r) => r.screen === 'home').map(mapApp);
@@ -25,6 +25,7 @@ function mapApp(row) {
     glyph: row.glyph,
     tile: row.tile,
     portfolioSlug: row.portfolio_slug,
+    requiresAuth: row.requires_auth,
   };
 }
 

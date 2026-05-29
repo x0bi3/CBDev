@@ -175,9 +175,9 @@ router.get('/home-apps', async (_req, res) => {
 router.post('/home-apps', async (req, res) => {
   const b = req.body;
   const { rows } = await query(
-    `INSERT INTO home_apps (app_id, label, glyph, tile, screen, portfolio_slug, sort_order, active)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
-    [b.app_id, b.label, b.glyph || '📱', b.tile, b.screen || 'home', b.portfolio_slug || null, b.sort_order ?? 0, b.active !== false],
+    `INSERT INTO home_apps (app_id, label, glyph, tile, screen, portfolio_slug, sort_order, requires_auth, active)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+    [b.app_id, b.label, b.glyph || '📱', b.tile, b.screen || 'home', b.portfolio_slug || null, b.sort_order ?? 0, !!b.requires_auth, b.active !== false],
   );
   res.status(201).json({ app: rows[0] });
 });
@@ -185,9 +185,9 @@ router.post('/home-apps', async (req, res) => {
 router.put('/home-apps/:id', async (req, res) => {
   const b = req.body;
   const { rows } = await query(
-    `UPDATE home_apps SET app_id=$1, label=$2, glyph=$3, tile=$4, screen=$5, portfolio_slug=$6, sort_order=$7, active=$8
-     WHERE id=$9 RETURNING *`,
-    [b.app_id, b.label, b.glyph, b.tile, b.screen, b.portfolio_slug || null, b.sort_order ?? 0, b.active !== false, req.params.id],
+    `UPDATE home_apps SET app_id=$1, label=$2, glyph=$3, tile=$4, screen=$5, portfolio_slug=$6, sort_order=$7, requires_auth=$8, active=$9
+     WHERE id=$10 RETURNING *`,
+    [b.app_id, b.label, b.glyph, b.tile, b.screen, b.portfolio_slug || null, b.sort_order ?? 0, !!b.requires_auth, b.active !== false, req.params.id],
   );
   if (!rows[0]) { res.status(404).json({ error: 'Not found' }); return; }
   res.json({ app: rows[0] });

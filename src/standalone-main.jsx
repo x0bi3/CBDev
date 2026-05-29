@@ -321,12 +321,18 @@ function resolveHomeApps(appOrder, isAuthed, baseHome = homeApps) {
   for (const a of baseHome) {
     if (!seen.has(a.id)) { out.push(a); seen.add(a.id); }
   }
-  if (isAuthed) out.push(calendarApp);
-  return out;
+  return isAuthed ? out : out.filter((a) => !a.requiresAuth);
 }
 
 function mapHomeAppFromApi(a) {
-  return { id: a.id, label: a.label, glyph: a.glyph, tile: a.tile, portfolioSlug: a.portfolioSlug || null };
+  return {
+    id: a.id,
+    label: a.label,
+    glyph: a.glyph,
+    tile: a.tile,
+    portfolioSlug: a.portfolioSlug || null,
+    requiresAuth: !!a.requiresAuth,
+  };
 }
 const dockApps = [
   { id:'about',     label:'About',     tile:'linear-gradient(135deg,#60a5fa,#1e40af)', glyph:'👤' },

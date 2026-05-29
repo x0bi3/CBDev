@@ -208,7 +208,7 @@ function HomeAppsSection() {
   return (
     <div>
       <div className="mb-4 flex justify-between"><h2 className="text-xl font-semibold">Home & dock apps</h2><Btn onClick={() => setEdit({ app_id:'', label:'', glyph:'📱', tile:'linear-gradient(135deg,#6366f1,#8b5cf6)', screen:'home', active:true })}>Add app</Btn></div>
-      <Table columns={[{key:'app_id',label:'ID'},{key:'label',label:'Label'},{key:'screen',label:'Screen'},{key:'portfolio_slug',label:'Portfolio slug'}]} rows={rows} onEdit={setEdit} onDelete={async r=>{if(confirm('Delete?')){await api('/admin/home-apps/'+r.id,{method:'DELETE'});load();}}} />
+      <Table columns={[{key:'app_id',label:'ID'},{key:'label',label:'Label'},{key:'screen',label:'Screen'},{key:'requires_auth',label:'Auth only',render:r=>r.requires_auth?'yes':'no'},{key:'portfolio_slug',label:'Portfolio slug'}]} rows={rows} onEdit={setEdit} onDelete={async r=>{if(confirm('Delete?')){await api('/admin/home-apps/'+r.id,{method:'DELETE'});load();}}} />
       {edit && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => setEdit(null)}>
           <div className="w-full max-w-md rounded-2xl border border-slate-600 bg-slate-900 p-6" onClick={e=>e.stopPropagation()}>
@@ -221,6 +221,10 @@ function HomeAppsSection() {
               <Field label="Screen"><select className={inputCls()} value={edit.screen||'home'} onChange={e=>setEdit({...edit,screen:e.target.value})}><option value="home">home</option><option value="dock">dock</option></select></Field>
               <Field label="Portfolio slug (project tiles)"><input className={inputCls()} value={edit.portfolio_slug||''} onChange={e=>setEdit({...edit,portfolio_slug:e.target.value||null})} placeholder="optional" /></Field>
               <Field label="Sort order"><input type="number" className={inputCls()} value={edit.sort_order||0} onChange={e=>setEdit({...edit,sort_order:Number(e.target.value)})} /></Field>
+              <label className="flex items-center gap-2 text-sm text-slate-300">
+                <input type="checkbox" checked={!!edit.requires_auth} onChange={e=>setEdit({...edit,requires_auth:e.target.checked})} />
+                Requires sign-in (e.g. Calendar)
+              </label>
             </div>
             <div className="mt-6 flex gap-2"><Btn onClick={save}>Save</Btn><Btn variant="ghost" onClick={()=>setEdit(null)}>Cancel</Btn></div>
           </div>

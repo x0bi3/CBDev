@@ -20,24 +20,26 @@ CREATE TABLE home_apps (
   screen TEXT NOT NULL DEFAULT 'home' CHECK (screen IN ('home', 'dock')),
   portfolio_slug TEXT,
   sort_order INTEGER NOT NULL DEFAULT 0,
+  requires_auth BOOLEAN NOT NULL DEFAULT FALSE,
   active BOOLEAN NOT NULL DEFAULT TRUE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-INSERT INTO home_apps (app_id, label, glyph, tile, screen, portfolio_slug, sort_order) VALUES
-  ('merch', 'Merch', '🛍️', 'linear-gradient(135deg,#f43f5e,#7c2d12)', 'home', NULL, 1),
-  ('blog', 'Blog', '✍️', 'linear-gradient(135deg,#fbbf24,#b45309)', 'home', NULL, 2),
-  ('support', 'Support', '🛠️', 'linear-gradient(135deg,#38bdf8,#1e3a8a)', 'home', NULL, 3),
-  ('music', 'Music', '🎧', 'linear-gradient(135deg,#ec4899,#581c87)', 'home', NULL, 4),
-  ('legal', 'Legal', '⚖️', 'linear-gradient(135deg,#94a3b8,#1e293b)', 'home', NULL, 5),
-  ('settings', 'Settings', '⚙️', 'linear-gradient(135deg,#9ca3af,#374151)', 'home', NULL, 6),
-  ('project-a', 'Project A', '🚀', 'linear-gradient(135deg,#22d3ee,#0e7490)', 'home', 'project-a', 7),
-  ('project-b', 'Project B', '🧪', 'linear-gradient(135deg,#a78bfa,#4c1d95)', 'home', 'project-b', 8),
-  ('project-c', 'Project C', '🌿', 'linear-gradient(135deg,#34d399,#065f46)', 'home', 'project-c', 9),
-  ('about', 'About', '👤', 'linear-gradient(135deg,#60a5fa,#1e40af)', 'dock', NULL, 1),
-  ('services', 'Services', '🛠️', 'linear-gradient(135deg,#f59e0b,#b45309)', 'dock', NULL, 2),
-  ('portfolio', 'Portfolio', '💼', 'linear-gradient(135deg,#10b981,#065f46)', 'dock', NULL, 3),
-  ('contact', 'Contact', '✉️', 'linear-gradient(135deg,#ec4899,#831843)', 'dock', NULL, 4)
+INSERT INTO home_apps (app_id, label, glyph, tile, screen, portfolio_slug, sort_order, requires_auth) VALUES
+  ('merch', 'Merch', '🛍️', 'linear-gradient(135deg,#f43f5e,#7c2d12)', 'home', NULL, 1, FALSE),
+  ('blog', 'Blog', '✍️', 'linear-gradient(135deg,#fbbf24,#b45309)', 'home', NULL, 2, FALSE),
+  ('support', 'Support', '🛠️', 'linear-gradient(135deg,#38bdf8,#1e3a8a)', 'home', NULL, 3, FALSE),
+  ('music', 'Music', '🎧', 'linear-gradient(135deg,#ec4899,#581c87)', 'home', NULL, 4, FALSE),
+  ('legal', 'Legal', '⚖️', 'linear-gradient(135deg,#94a3b8,#1e293b)', 'home', NULL, 5, FALSE),
+  ('settings', 'Settings', '⚙️', 'linear-gradient(135deg,#9ca3af,#374151)', 'home', NULL, 6, FALSE),
+  ('project-a', 'Project A', '🚀', 'linear-gradient(135deg,#22d3ee,#0e7490)', 'home', 'project-a', 7, FALSE),
+  ('project-b', 'Project B', '🧪', 'linear-gradient(135deg,#a78bfa,#4c1d95)', 'home', 'project-b', 8, FALSE),
+  ('project-c', 'Project C', '🌿', 'linear-gradient(135deg,#34d399,#065f46)', 'home', 'project-c', 9, FALSE),
+  ('calendar', 'Calendar', '📅', 'linear-gradient(135deg,#34d399,#0f766e)', 'home', NULL, 10, TRUE),
+  ('about', 'About', '👤', 'linear-gradient(135deg,#60a5fa,#1e40af)', 'dock', NULL, 1, FALSE),
+  ('services', 'Services', '🛠️', 'linear-gradient(135deg,#f59e0b,#b45309)', 'dock', NULL, 2, FALSE),
+  ('portfolio', 'Portfolio', '💼', 'linear-gradient(135deg,#10b981,#065f46)', 'dock', NULL, 3, FALSE),
+  ('contact', 'Contact', '✉️', 'linear-gradient(135deg,#ec4899,#831843)', 'dock', NULL, 4, FALSE)
 ON CONFLICT (app_id) DO NOTHING;
 
 -- Admin account (password: change-me-admin — update after first login)
