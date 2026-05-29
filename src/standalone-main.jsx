@@ -71,6 +71,27 @@ const eyes = {
 };
 const eyeOrder = ['outline','scanner','abstract'];
 
+/* ========================= API ========================= */
+const API_TOKEN_KEY = 'iphone-portfolio:token';
+
+async function api(path, opts = {}) {
+  const { method = 'GET', body, auth = true } = opts;
+  const headers = { 'Content-Type': 'application/json' };
+  if (auth !== false) {
+    const token = localStorage.getItem(API_TOKEN_KEY);
+    if (token) headers.Authorization = 'Bearer ' + token;
+  }
+  const res = await fetch('/api' + path, {
+    method,
+    headers,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+  let data = {};
+  try { data = await res.json(); } catch (_) { /* empty body */ }
+  if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+  return data;
+}
+
 /* ========================= CONTEXT ========================= */
 const DeviceCtx = createContext(null);
 const useDevice = () => useContext(DeviceCtx);
@@ -137,8 +158,23 @@ function DeviceProvider({ children }) {
   }, [appOrder]);
   useEffect(() => {
     if (auth) localStorage.setItem('iphone-portfolio:auth', JSON.stringify(auth));
-    else localStorage.removeItem('iphone-portfolio:auth');
+    else {
+      localStorage.removeItem('iphone-portfolio:auth');
+      localStorage.removeItem(API_TOKEN_KEY);
+    }
   }, [auth]);
+
+  useEffect(() => {
+    const token = localStorage.getItem(API_TOKEN_KEY);
+    if (!token) return;
+    api('/auth/me')
+      .then((r) => { if (r.user) setAuthState(r.user); })
+      .catch(() => {
+        localStorage.removeItem(API_TOKEN_KEY);
+        localStorage.removeItem('iphone-portfolio:auth');
+        setAuthState(null);
+      });
+  }, []);
 
   const openApp = useCallback((id) => {
     setOpenAppId(curr => {
@@ -647,11 +683,17 @@ const work = [
 ];
 function PortfolioApp() {
   const [selected, setSelected] = useState(null);
+  const [projects, setProjects] = useState(work);
+  useEffect(() => {
+    api('/portfolio', { auth: false })
+      .then((r) => { if (r.projects?.length) setProjects(r.projects); })
+      .catch(() => { /* keep fallback work[] */ });
+  }, []);
   return (
     <>
       <AppShell title="Portfolio" subtitle="Tap a project to dive in.">
         <div className="grid grid-cols-2 gap-3">
-          {work.map(p => (
+          {projects.map(p => (
             <button key={p.id} onClick={() => setSelected(p)}
               className="text-left rounded-2xl overflow-hidden border border-white/10 bg-white/[0.06] backdrop-blur-md transition hover:border-white/25 active:scale-[0.98]">
               <div className={'aspect-[4/3] bg-gradient-to-br ' + p.color} />
@@ -742,8 +784,20 @@ function MerchApp() {
   const [cart, setCart] = useState([]);            // [{ id, name, price, variant, qty }]
   const [cartOpen, setCartOpen] = useState(false);
   const [checkoutStage, setCheckoutStage] = useState(null); // null | 'address' | 'payment' | 'done'
+  const [productList, setProductList] = useState(merch);
+  const [categoryList, setCategoryList] = useState(merchCategories);
 
-  const filtered = merch.filter(p =>
+  useEffect(() => {
+    Promise.all([
+      api('/products', { auth: false }),
+      api('/products/categories', { auth: false }),
+    ]).then(([prodRes, catRes]) => {
+      if (prodRes.products?.length) setProductList(prodRes.products);
+      if (catRes.categories?.length) setCategoryList(catRes.categories);
+    }).catch(() => { /* keep fallback arrays */ });
+  }, []);
+
+  const filtered = productList.filter(p =>
     (cat === 'all' || p.cat === cat) &&
     (q.trim() === '' || p.name.toLowerCase().includes(q.toLowerCase()))
   );
@@ -797,7 +851,7 @@ function MerchApp() {
               </div>
               <p className="px-2 pt-1 text-[10px] uppercase tracking-wider text-white/45">Categories</p>
               <nav className="flex flex-col gap-1">
-                {merchCategories.map(c => (
+                {categoryList.map(c => (
                   <button key={c.id} onClick={() => setCat(c.id)}
                     className={'flex items-center gap-2 rounded-xl px-3 py-2 text-[13px] font-medium transition ' +
                       (cat === c.id ? 'bg-white/15 text-white' : 'text-white/70 hover:bg-white/5 hover:text-white')}>
@@ -1140,7 +1194,25 @@ function BlogApp() {
   const [selected, setSelected] = useState(null);
   const [subEmail, setSubEmail] = useState('');
   const [subbed, setSubbed] = useState(false);
-  const subscribe = (e) => { e.preventDefault(); setSubbed(true); };
+  const [postList, setPostList] = useState(posts);
+  const [subErr, setSubErr] = useState(null);
+
+  useEffect(() => {
+    api('/blog', { auth: false })
+      .then((r) => { if (r.posts?.length) setPostList(r.posts); })
+      .catch(() => { /* keep fallback posts[] */ });
+  }, []);
+
+  const subscribe = async (e) => {
+    e.preventDefault();
+    setSubErr(null);
+    try {
+      await api('/blog/newsletter', { auth: false, method: 'POST', body: { email: subEmail.trim() } });
+      setSubbed(true);
+    } catch (err) {
+      setSubErr(err.message || 'Subscription failed');
+    }
+  };
   return (
     <>
       <AppShell title="Blog" subtitle="Notes from the workshop.">
@@ -1159,10 +1231,13 @@ function BlogApp() {
               Subscribed. See you in your inbox.
             </div>
           ) : (
-            <form onSubmit={subscribe} className="mt-3 flex gap-2">
-              <input required type="email" value={subEmail} onChange={e => setSubEmail(e.target.value)} placeholder="you@email.com"
-                className="flex-1 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-[13px] outline-none focus:border-white/30" />
-              <button type="submit" className="rounded-xl bg-white px-4 py-2 text-[13px] font-semibold text-black active:scale-95">Subscribe</button>
+            <form onSubmit={subscribe} className="mt-3 flex flex-col gap-2">
+              <div className="flex gap-2">
+                <input required type="email" value={subEmail} onChange={e => setSubEmail(e.target.value)} placeholder="you@email.com"
+                  className="flex-1 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-[13px] outline-none focus:border-white/30" />
+                <button type="submit" className="rounded-xl bg-white px-4 py-2 text-[13px] font-semibold text-black active:scale-95">Subscribe</button>
+              </div>
+              {subErr && <p className="text-[12px] text-rose-300">{subErr}</p>}
             </form>
           )}
         </div>
@@ -1174,7 +1249,7 @@ function BlogApp() {
           <div className="h-px flex-1 bg-white/10" />
         </div>
 
-        {posts.map(p => (
+        {postList.map(p => (
           <button key={p.id} onClick={() => setSelected(p)} className="text-left">
             <Card>
               <div className="flex items-start justify-between gap-4">
@@ -1333,11 +1408,28 @@ function SupportApp() {
 function SupportLogin({ onBack, onSuccess }) {
   const [email, setEmail] = useState('');
   const [pw, setPw] = useState('');
+  const [err, setErr] = useState(null);
+  const onSubmit = async (e) => {
+    e.preventDefault();
+    setErr(null);
+    try {
+      const r = await api('/auth/login', {
+        auth: false,
+        method: 'POST',
+        body: { email: email.trim().toLowerCase(), password: pw },
+      });
+      if (r.token) localStorage.setItem(API_TOKEN_KEY, r.token);
+      const n = r.user?.name || email.split('@')[0] || 'Client';
+      onSuccess(n);
+    } catch (ex) {
+      setErr(ex.message || 'Login failed');
+    }
+  };
   return (
-    <form onSubmit={e => { e.preventDefault(); const n = email.split('@')[0] || 'Client'; onSuccess(n.charAt(0).toUpperCase()+n.slice(1)); }}>
+    <form onSubmit={onSubmit}>
       <Card>
         <p className="text-[12px] uppercase tracking-wider text-white/50">Client log in</p>
-        <p className="mt-1 text-[13px] text-white/65">Demo only. Any credentials will log you in.</p>
+        <p className="mt-1 text-[13px] text-white/65">Use your CreativeBuilds account (demo: demo@creativebuilds.dev / demo1234).</p>
         <div className="mt-4 flex flex-col gap-3">
           <label className="flex flex-col gap-1">
             <span className="text-[11px] font-medium uppercase tracking-wider text-white/55">Email</span>
@@ -1353,6 +1445,7 @@ function SupportLogin({ onBack, onSuccess }) {
             <button type="button" onClick={onBack} className="flex-1 rounded-2xl border border-white/15 py-3 text-[14px] font-semibold text-white/80">Cancel</button>
             <button type="submit" className="flex-[2] rounded-2xl bg-white py-3 text-[14px] font-semibold text-black active:scale-[0.98]">Log in</button>
           </div>
+          {err && <p className="text-[12px] text-rose-300">{err}</p>}
           <button type="button" className="mt-1 text-[12px] text-white/55 hover:text-white">Forgot password?</button>
         </div>
       </Card>
@@ -1361,21 +1454,52 @@ function SupportLogin({ onBack, onSuccess }) {
 }
 
 function SupportTicketForm({ authedName, onBack, onSubmitted }) {
+  const { auth } = useDevice();
   const [clientId, setClientId] = useState('');
   const [title, setTitle] = useState('');
   const [category, setCategory] = useState(supportCategories[0]);
   const [priority, setPriority] = useState('Normal');
   const [pref, setPref] = useState('Email'); // Email | Phone | Text
-  const [contactEmail, setContactEmail] = useState('');
+  const [contactEmail, setContactEmail] = useState(auth?.email || '');
   const [contactPhone, setContactPhone] = useState('');
   const [description, setDescription] = useState('');
+  const [submitErr, setSubmitErr] = useState(null);
+  const [submitting, setSubmitting] = useState(false);
 
   // Conditional contact field based on preference
   const needsEmail = pref === 'Email';
   const needsPhone = pref === 'Phone' || pref === 'Text';
 
+  const onSubmit = async (e) => {
+    e.preventDefault();
+    setSubmitErr(null);
+    setSubmitting(true);
+    const email = (needsEmail ? contactEmail : (auth?.email || contactEmail)).trim().toLowerCase();
+    try {
+      await api('/tickets', {
+        method: 'POST',
+        body: {
+          subject: title.trim(),
+          message: description.trim(),
+          email,
+          category,
+          priority,
+          clientId: clientId.trim() || null,
+          contactPref: pref,
+          contactEmail: needsEmail ? email : (auth?.email || null),
+          contactPhone: needsPhone ? contactPhone.trim() : null,
+        },
+      });
+      onSubmitted();
+    } catch (err) {
+      setSubmitErr(err.message || 'Failed to submit ticket');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   return (
-    <form onSubmit={e => { e.preventDefault(); onSubmitted(); }}>
+    <form onSubmit={onSubmit}>
       {authedName && (
         <Card>
           <div className="flex items-center gap-3">
@@ -1457,8 +1581,11 @@ function SupportTicketForm({ authedName, onBack, onSubmitted }) {
 
           <div className="flex gap-2 pt-1">
             <button type="button" onClick={onBack} className="flex-1 rounded-2xl border border-white/15 py-3 text-[14px] font-semibold text-white/80">Cancel</button>
-            <button type="submit" className="flex-[2] rounded-2xl bg-white py-3 text-[14px] font-semibold text-black active:scale-[0.98]">Submit ticket</button>
+            <button type="submit" disabled={submitting} className="flex-[2] rounded-2xl bg-white py-3 text-[14px] font-semibold text-black active:scale-[0.98] disabled:opacity-60">
+              {submitting ? 'Sending…' : 'Submit ticket'}
+            </button>
           </div>
+          {submitErr && <p className="text-[12px] text-rose-300">{submitErr}</p>}
         </div>
       </Card>
     </form>
@@ -2420,23 +2547,43 @@ function AuthSheet() {
 
   const validEmail = (v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim());
 
-  const submit = (e) => {
+  const submit = async (e) => {
     e.preventDefault();
     const cleanEmail = email.trim().toLowerCase();
     if (!validEmail(cleanEmail)) { setStatus({ type:'err', msg:'Please enter a valid email address.' }); return; }
     if (mode === 'reset') {
-      setStatus({ type:'ok', msg:'If an account exists for ' + cleanEmail + ', a reset link is on its way.' });
+      try {
+        const r = await api('/auth/reset/request', { auth: false, method: 'POST', body: { email: cleanEmail } });
+        let msg = r.message || ('If an account exists for ' + cleanEmail + ', a reset link is on its way.');
+        if (r.devToken) msg += ' (dev token logged to console)';
+        setStatus({ type:'ok', msg });
+      } catch (err) {
+        setStatus({ type:'err', msg: err.message || 'Reset request failed' });
+      }
       return;
     }
     if (password.length < 6) { setStatus({ type:'err', msg:'Passwords need to be at least 6 characters.' }); return; }
     if (mode === 'register' && !name.trim()) { setStatus({ type:'err', msg:'What should I call you?' }); return; }
-    const user = { email: cleanEmail, name: name.trim() || cleanEmail.split('@')[0], createdAt: Date.now() };
-    setAuth(user);
-    setStatus({ type:'ok', msg: mode === 'register' ? 'Account created. Welcome aboard.' : 'Signed in.' });
-    setTimeout(() => closeAuth(), 650);
+    try {
+      const path = mode === 'register' ? '/auth/register' : '/auth/login';
+      const body = mode === 'register'
+        ? { email: cleanEmail, name: name.trim(), password }
+        : { email: cleanEmail, password };
+      const r = await api(path, { auth: false, method: 'POST', body });
+      if (r.token) localStorage.setItem(API_TOKEN_KEY, r.token);
+      setAuth(r.user);
+      setStatus({ type:'ok', msg: mode === 'register' ? 'Account created. Welcome aboard.' : 'Signed in.' });
+      setTimeout(() => closeAuth(), 650);
+    } catch (err) {
+      setStatus({ type:'err', msg: err.message || 'Authentication failed' });
+    }
   };
 
-  const signOut = () => { setAuth(null); setStatus({ type:'ok', msg:'Signed out.' }); };
+  const signOut = () => {
+    localStorage.removeItem(API_TOKEN_KEY);
+    setAuth(null);
+    setStatus({ type:'ok', msg:'Signed out.' });
+  };
 
   const tabBtn = (id, label) => (
     <button type="button" onClick={() => { setMode(id); setStatus(null); }}
@@ -2466,7 +2613,7 @@ function AuthSheet() {
             <span className="rounded-full bg-emerald-400/20 px-2 py-0.5 text-[10px] font-medium text-emerald-200 ring-1 ring-emerald-300/30">Active</span>
           </div>
           <p className="px-1 text-[11px] text-white/55">
-            This is a demo account stored only in your browser. No data is sent anywhere.
+            Signed in with your CreativeBuilds account.
           </p>
           <button onClick={signOut}
             className="w-full rounded-xl bg-white/10 px-4 py-2.5 text-[13px] font-medium text-white ring-1 ring-white/15 transition hover:bg-white/20 active:scale-[0.98]">
@@ -2512,7 +2659,7 @@ function AuthSheet() {
             {mode === 'reset' ? 'Send reset link' : (mode === 'register' ? 'Create account' : 'Sign in')}
           </button>
           <p className="px-1 text-center text-[11px] text-white/50">
-            Demo authentication. Credentials stay in your browser and never reach a server.
+            Accounts are stored securely on the CreativeBuilds server.
           </p>
         </form>
       )}
