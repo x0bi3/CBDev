@@ -46,9 +46,14 @@ ensureUploadDirs();
 const app = express();
 const PORT = Number(process.env.PORT) || 3020;
 
+const ADMIN_HOSTS = new Set([
+  'admin.creativebuilds.dev',
+  'creativeadmin.cyberopticsoftware.com',
+]);
+
 function isAdminHost(req) {
   const host = (req.headers.host || '').split(':')[0].toLowerCase();
-  return host === 'creativeadmin.cyberopticsoftware.com';
+  return ADMIN_HOSTS.has(host);
 }
 
 app.use(express.json({ limit: '2mb' }));

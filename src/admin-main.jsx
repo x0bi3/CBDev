@@ -37,7 +37,7 @@ function Login({ onLogin }) {
     <div className="grid min-h-screen place-items-center p-6">
       <form onSubmit={submit} className="w-full max-w-sm rounded-2xl border border-slate-700 bg-slate-900 p-8 shadow-xl">
         <h1 className="text-2xl font-bold">CreativeBuilds Admin</h1>
-        <p className="mt-1 text-sm text-slate-400">creativeadmin.cyberopticsoftware.com</p>
+        <p className="mt-1 text-sm text-slate-400">admin.creativebuilds.dev</p>
         <label className="mt-6 block text-sm text-slate-300">Email</label>
         <input className="mt-1 w-full rounded-lg border border-slate-600 bg-slate-800 px-3 py-2" value={email} onChange={e => setEmail(e.target.value)} type="email" required />
         <label className="mt-4 block text-sm text-slate-300">Password</label>
