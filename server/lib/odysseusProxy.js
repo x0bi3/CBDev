@@ -13,24 +13,58 @@ const REWRITE_TYPES = new Set([
   'application/json',
 ]);
 
+function rewritePaths(text) {
+  const P = CHAT_PREFIX;
+
+  // Template literals: `/api/...`, `/static/...`
+  text = text.replace(/`\/(api|static)\//g, (_, root) => '`' + P + '/' + root + '/');
+
+  // Quoted app paths — only /api and /static (never blanket quote+slash)
+  text = text.replace(/(['"])\/(api|static)(?=\/|['"])/g, `$1${P}/$2`);
+
+  // SPA deep-link routes
+  text = text.replace(
+    /(['"])\/(notes|calendar|cookbook|email|memory|gallery|tasks|library|login|backgrounds)(?=['"/?#]|$)/g,
+    `$1${P}/$2`,
+  );
+
+  // HTML attributes
+  text = text
+    .replace(/(\s(?:href|src|action)\s*=\s*["'])\/(?!chat\/)(api|static)\//gi, `$1${P}/$2/`)
+    .replace(
+      /(\s(?:href|src|action)\s*=\s*["'])\/(?!chat\/)(?:notes|calendar|cookbook|email|memory|gallery|tasks|library|login|backgrounds)\b/gi,
+      `$1${P}/$2`,
+    );
+
+  // fetch/import/EventSource/WebSocket calls
+  text = text
+    .replace(/(\bfetch\s*\(\s*['"])\/(?!chat\/)/g, `$1${P}/`)
+    .replace(/(\bimport\s*\(\s*['"])\/(?!chat\/)/g, `$1${P}/`)
+    .replace(/(\bnew\s+EventSource\s*\(\s*['"])\/(?!chat\/)/g, `$1${P}/`)
+    .replace(/(\bnew\s+WebSocket\s*\(\s*['"])\/(?!chat\/)/g, `$1${P}/`);
+
+  // CSS url(/static/...)
+  text = text.replace(/url\(\s*(["']?)\/(?!chat\/)(api|static)\//g, `url($1${P}/$2/`);
+
+  // Attribute fallbacks for paths without api/static prefix
+  text = text
+    .replace(/="\/(?!chat\/)(api|static)\//g, `="${P}/$1/`)
+    .replace(/='\/(?!chat\/)(api|static)\//g, `='${P}/$1/`);
+
+  text = text.replace(
+    /window\.location\.(replace|assign)\s*\(\s*['"]\/?['"]\s*\)/gi,
+    `window.location.$1('${P}/')`,
+  );
+
+  return text;
+}
+
 function rewriteBody(body, contentType) {
   if (!body?.length || !contentType) return body;
   const baseType = contentType.split(';')[0].trim().toLowerCase();
   if (!REWRITE_TYPES.has(baseType)) return body;
 
-  let text = body.toString('utf8');
-
-  text = text
-    .replace(/(['"`])\/(?!chat\/)/g, `$1${CHAT_PREFIX}/`)
-    .replace(/="\/(?!chat\/)/g, `="${CHAT_PREFIX}/`)
-    .replace(/='\/(?!chat\/)/g, `='${CHAT_PREFIX}/`)
-    .replace(/\(\/(?!chat\/)/g, `(${CHAT_PREFIX}/`)
-    .replace(/url\(\/(?!chat\/)/g, `url(${CHAT_PREFIX}/`)
-    .replace(
-      /window\.location\.(replace|assign)\s*\(\s*['"]\/?['"]\s*\)/gi,
-      `window.location.$1('${CHAT_PREFIX}/')`,
-    );
-
+  const text = rewritePaths(body.toString('utf8'));
   return Buffer.from(text, 'utf8');
 }
 
