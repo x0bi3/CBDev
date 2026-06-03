@@ -1,9 +1,11 @@
 import http from 'node:http';
+import { findUserByUsername, signToken } from '../auth.js';
+import { setCbdevTokenCookie } from './odysseusAuth.js';
 
 const CHAT_PREFIX = '/chat';
 const TARGET = process.env.ODYSSEUS_URL || 'http://127.0.0.1:7000';
 
-const INJECT_SCRIPT = `<script>(function(){var P='${CHAT_PREFIX}';function rw(u){if(typeof u!=='string')return u;if(u.startsWith(P+'/')||u===P)return u;try{var o=new URL(u,location.origin);if(o.origin===location.origin&&o.pathname.startsWith('/')&&!o.pathname.startsWith(P)){o.pathname=P+o.pathname;return o.toString();}}catch(e){}if(u.startsWith('/')&&!u.startsWith(P))return P+u;return u;}var f=window.fetch;window.fetch=function(i,n){if(typeof i==='string')i=rw(i);else if(i&&i.url)i=new Request(rw(i.url),i);return f.call(this,i,n);};var ES=window.EventSource;window.EventSource=function(u,o){return new ES(rw(u),o);};var op=window.open;window.open=function(u,t,f){if(typeof u==='string')u=rw(u);return op.call(window,u,t,f);};})();</script>`;
+const INJECT_SCRIPT = `<script>(function(){var P='${CHAT_PREFIX}';function rw(u){if(typeof u!=='string')return u;if(u.startsWith(P+'/')||u===P)return u;try{var o=new URL(u,location.origin);if(o.origin===location.origin&&o.pathname.startsWith('/')&&!o.pathname.startsWith(P)){o.pathname=P+o.pathname;return o.toString();}}catch(e){}if(u.startsWith('/')&&!u.startsWith(P))return P+u;return u;}var f=window.fetch;window.fetch=function(i,n){if(typeof i==='string')i=rw(i);else if(i&&i.url)i=new Request(rw(i.url),i);return f.call(this,i,n);};var ES=window.EventSource;window.EventSource=function(u,o){return new ES(rw(u),o);};var op=window.open;window.open=function(u,t,f){if(typeof u==='string')u=rw(u);return op.call(window,u,t,f);};try{var LP=Location.prototype,A=LP.assign,R=LP.replace;LP.assign=function(u){return A.call(this,rw(u));};LP.replace=function(u){return R.call(this,rw(u));};var hd=Object.getOwnPropertyDescriptor(LP,'href');if(hd&&hd.set){var gs=hd.get,ss=hd.set;Object.defineProperty(LP,'href',{get:gs,set:function(v){ss.call(this,rw(v));},configurable:true,enumerable:true});}}catch(e){}})();</script>`;
 
 const REWRITE_TYPES = new Set([
   'text/html',
@@ -95,6 +97,23 @@ export function createOdysseusProxy() {
           const rewritten = rewriteBody(body, contentType);
           if (rewritten !== body) {
             outHeaders['content-length'] = String(rewritten.length);
+          }
+
+          // Odysseus login at /chat → also issue CreativeBuilds session cookie
+          if (
+            req.method === 'POST'
+            && upstreamPath.startsWith('/api/auth/login')
+            && proxyRes.statusCode === 200
+          ) {
+            try {
+              const data = JSON.parse(body.toString('utf8'));
+              if (data.ok && data.username) {
+                const row = await findUserByUsername(data.username);
+                if (row) setCbdevTokenCookie(res, signToken(row));
+              }
+            } catch {
+              // ignore malformed login responses
+            }
           }
 
           res.writeHead(proxyRes.statusCode || 200, outHeaders);
