@@ -152,6 +152,7 @@ function DeviceProvider({ children }) {
   const [themeId, setThemeId] = useState(() => localStorage.getItem('iphone-portfolio:theme') || 'liquid-glass');
   const [eyeId, setEyeId] = useState(() => localStorage.getItem('iphone-portfolio:eye') || 'outline');
   const [homePage, setHomePage] = useState(0);
+  const [openFolderId, setOpenFolderId] = useState(null);
   const [openAppId, setOpenAppId] = useState(null);
   const [prevAppId, setPrevAppId] = useState(null);
   const [shellAppId, setShellAppId] = useState(null);
@@ -199,8 +200,8 @@ function DeviceProvider({ children }) {
     apiCached('/home/apps', {}, API_CACHE_TTL.homeApps, auth?.id)
       .then((r) => {
         setScreenApps({
-          home: r.home?.length ? r.home.map(mapHomeAppFromApi) : homeApps,
-          dock: r.dock?.length ? r.dock.map(mapHomeAppFromApi) : dockApps,
+          home: normalizeHomeFromApi(r.home),
+          dock: normalizeDockFromApi(r.home, r.dock),
         });
       })
       .catch(() => { /* keep defaults */ });
@@ -259,7 +260,11 @@ function DeviceProvider({ children }) {
       });
   }, []);
 
+  const openFolder = useCallback((id) => setOpenFolderId(id), []);
+  const closeFolder = useCallback(() => setOpenFolderId(null), []);
+
   const openApp = useCallback((id) => {
+    setOpenFolderId(null);
     const meta = screenAppsRef.current.home.find((a) => a.id === id)
       || screenAppsRef.current.dock.find((a) => a.id === id);
     if (meta?.requiresAuth && !authRef.current) {
@@ -304,12 +309,13 @@ function DeviceProvider({ children }) {
         if (authOpen) { setAuthOpen(false); return; }
         if (miniPlayerOpen) { setMiniPlayerOpen(false); return; }
         if (ccOpen) { setCcOpen(false); return; }
+        if (openFolderId) { closeFolder(); return; }
         closeApp();
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [authOpen, miniPlayerOpen, ccOpen, closeApp]);
+  }, [authOpen, miniPlayerOpen, ccOpen, openFolderId, closeFolder, closeApp]);
 
   const setAppOrder = useCallback((next) => setAppOrderState(next), []);
   const resetAppOrder = useCallback(() => {
@@ -345,6 +351,7 @@ function DeviceProvider({ children }) {
     themeId, setTheme:setThemeId,
     eyeId, setEye:setEyeId,
     homePage, setHomePage,
+    openFolderId, openFolder, closeFolder,
     openAppId, prevAppId, shellAppId, openApp, closeApp, handleShellExitComplete,
     ccOpen, toggleCc, closeCc,
     appOrder, setAppOrder, resetAppOrder,
@@ -357,9 +364,9 @@ function DeviceProvider({ children }) {
     miniPlayerOpen, openMiniPlayer, closeMiniPlayer,
     // gesture lock
     dragLocked, lockDrag, unlockDrag,
-  }), [themeId, eyeId, homePage, openAppId, prevAppId, shellAppId, ccOpen, appOrder, auth, authOpen, screenApps,
+  }), [themeId, eyeId, homePage, openFolderId, openAppId, prevAppId, shellAppId, ccOpen, appOrder, auth, authOpen, screenApps,
       musicCurrent, musicPlaying, musicVolume, musicStatus, miniPlayerOpen, dragLocked,
-      openApp, closeApp, handleShellExitComplete, setAppOrder, resetAppOrder, setAuth, openAuth, closeAuth,
+      openFolder, closeFolder, openApp, closeApp, handleShellExitComplete, setAppOrder, resetAppOrder, setAuth, openAuth, closeAuth,
       toggleCc, closeCc, playStation, togglePlay, setMusicVolume, openMiniPlayer, closeMiniPlayer,
       lockDrag, unlockDrag]);
   return <DeviceCtx.Provider value={value}>{children}</DeviceCtx.Provider>;
@@ -369,14 +376,25 @@ function DeviceProvider({ children }) {
 const homeApps = [
   { id:'merch',     label:'Merch',     tile:'linear-gradient(135deg,#f43f5e,#7c2d12)', glyph:'🛍️' },
   { id:'blog',      label:'Blog',      tile:'linear-gradient(135deg,#fbbf24,#b45309)', glyph:'✍️' },
-  { id:'support',   label:'Support',   tile:'linear-gradient(135deg,#38bdf8,#1e3a8a)', glyph:'🛠️' },
   { id:'music',     label:'Music',     tile:'linear-gradient(135deg,#ec4899,#581c87)', glyph:'🎧' },
-  { id:'legal',     label:'Legal',     tile:'linear-gradient(135deg,#94a3b8,#1e293b)', glyph:'⚖️' },
   { id:'settings',  label:'Settings',  tile:'linear-gradient(135deg,#9ca3af,#374151)', glyph:'⚙️' },
+  { id:'legal',     label:'Legal',     tile:'linear-gradient(135deg,#94a3b8,#1e293b)', glyph:'⚖️', homePage: 2 },
   { id:'project-a', label:'Project A', tile:'linear-gradient(135deg,#22d3ee,#0e7490)', glyph:'🚀' },
   { id:'project-b', label:'Project B', tile:'linear-gradient(135deg,#a78bfa,#4c1d95)', glyph:'🧪' },
   { id:'project-c', label:'Project C', tile:'linear-gradient(135deg,#34d399,#065f46)', glyph:'🌿' },
 ];
+const supportApp = {
+  id:'support', label:'Support', tile:'linear-gradient(135deg,#38bdf8,#1e3a8a)', glyph:'🛠️',
+};
+const PROJECT_FOLDER_ID = 'folder-projects';
+const PROJECT_APP_IDS = ['project-a', 'project-b', 'project-c'];
+const PROJECT_APP_ID_SET = new Set(PROJECT_APP_IDS);
+const projectsFolderMeta = {
+  id: PROJECT_FOLDER_ID,
+  label: 'Projects',
+  kind: 'folder',
+  appIds: PROJECT_APP_IDS,
+};
 const calendarApp = {
   id:'calendar', label:'Calendar', tile:'linear-gradient(135deg,#34d399,#0f766e)', glyph:'📅', requiresAuth: true,
 };
@@ -385,14 +403,58 @@ function resolveHomeApps(appOrder, baseHome = homeApps) {
   const byId = Object.fromEntries(baseHome.map(a => [a.id, a]));
   const baseIds = appOrder && Array.isArray(appOrder) ? appOrder : baseHome.map(a => a.id);
   const seen = new Set();
-  const out = [];
+  const normalized = [];
+  let folderQueued = false;
   for (const id of baseIds) {
-    if (byId[id] && !seen.has(id)) { out.push(byId[id]); seen.add(id); }
+    if (PROJECT_APP_ID_SET.has(id)) {
+      if (!folderQueued) { normalized.push(PROJECT_FOLDER_ID); folderQueued = true; }
+      continue;
+    }
+    if (id === PROJECT_FOLDER_ID) {
+      if (!folderQueued) { normalized.push(PROJECT_FOLDER_ID); folderQueued = true; }
+      continue;
+    }
+    if (!seen.has(id)) { normalized.push(id); seen.add(id); }
   }
+  const out = [];
+  for (const id of normalized) {
+    if (id === PROJECT_FOLDER_ID) {
+      out.push(projectsFolderMeta);
+      continue;
+    }
+    if (byId[id] && !PROJECT_APP_ID_SET.has(id) && id !== 'support' && id !== 'portfolio') out.push(byId[id]);
+  }
+  let folderPlaced = out.some((item) => item.id === PROJECT_FOLDER_ID);
   for (const a of baseHome) {
-    if (!seen.has(a.id)) { out.push(a); seen.add(a.id); }
+    if (PROJECT_APP_ID_SET.has(a.id)) {
+      if (!folderPlaced) { out.push(projectsFolderMeta); folderPlaced = true; }
+      continue;
+    }
+    if (a.id === 'support' || a.id === 'portfolio') continue;
+    if (!out.some((item) => item.id === a.id)) out.push(a);
   }
+  return out.map((item) => (item.id === 'legal' ? { ...item, homePage: 2 } : item));
+}
+
+function normalizeHomeFromApi(home) {
+  const list = (home?.length ? home.map(mapHomeAppFromApi) : homeApps)
+    .filter((a) => a.id !== 'support' && a.id !== 'portfolio');
+  return list.map((a) => (a.id === 'legal' ? { ...a, homePage: 2 } : a));
+}
+
+function normalizeDockFromApi(home, dock) {
+  const list = (dock?.length ? dock.map(mapHomeAppFromApi) : dockApps)
+    .filter((a) => a.id !== 'portfolio');
+  if (list.some((a) => a.id === 'support')) return list;
+  const fromHome = (home || []).find((a) => a.id === 'support' || a.app_id === 'support');
+  const support = fromHome ? mapHomeAppFromApi(fromHome) : supportApp;
+  const out = list.filter((a) => a.id !== 'support');
+  out.splice(2, 0, support);
   return out;
+}
+
+function folderChildApps(folder, screenApps) {
+  return folder.appIds.map((id) => findApp(id, screenApps)).filter(Boolean);
 }
 
 function mapHomeAppFromApi(a) {
@@ -404,15 +466,16 @@ function mapHomeAppFromApi(a) {
     portfolioSlug: a.portfolioSlug || null,
     requiresAuth: !!a.requiresAuth,
     assignUsers: !!a.assignUsers,
+    homePage: a.id === 'legal' ? 2 : undefined,
   };
 }
 const dockApps = [
   { id:'about',     label:'About',     tile:'linear-gradient(135deg,#60a5fa,#1e40af)', glyph:'👤' },
   { id:'services',  label:'Services',  tile:'linear-gradient(135deg,#f59e0b,#b45309)', glyph:'🛠️' },
-  { id:'portfolio', label:'Portfolio', tile:'linear-gradient(135deg,#10b981,#065f46)', glyph:'💼' },
+  supportApp,
   { id:'contact',   label:'Contact',   tile:'linear-gradient(135deg,#ec4899,#831843)', glyph:'✉️' },
 ];
-const allApps = [...homeApps, calendarApp, ...dockApps];
+const allApps = [...homeApps, calendarApp, supportApp, ...dockApps];
 const getApp = id => allApps.find(a => a.id === id);
 
 function findApp(id, screenApps) {
@@ -433,7 +496,7 @@ function AppShell({ title, subtitle, children }) {
   );
 }
 const Card = ({ children, className = '' }) => (
-  <div className={'rounded-2xl border border-white/10 bg-white/[0.06] p-4 backdrop-blur-md ' + className}>{children}</div>
+  <div className={'rounded-2xl border border-white/10 bg-white/[0.08] p-4 ' + className}>{children}</div>
 );
 const Divider = () => <div className="h-px bg-white/10" />;
 const Row = ({ label, value, href }) => {
@@ -481,7 +544,7 @@ function SubView({ open, onBack, title, backLabel, children }) {
         >
           {/* Unified header: Back+label (left) + Title + Close-app X (right) */}
           <div
-            className="relative z-10 flex items-center justify-between gap-3 border-b border-white/10 bg-neutral-950/95 px-4 pb-3 shrink-0 backdrop-blur-md"
+            className="relative z-10 flex items-center justify-between gap-3 border-b border-white/10 bg-neutral-950 px-4 pb-3 shrink-0"
             style={{ paddingTop: 'calc(max(env(safe-area-inset-top),12px) + 52px)' }}
           >
             <button onClick={onBack} aria-label={backLabel || 'Back'}
@@ -822,7 +885,7 @@ function PortfolioApp() {
         <div className="grid grid-cols-2 gap-3">
           {projects.map(p => (
             <button key={p.id} onClick={() => setSelected(p)}
-              className="text-left rounded-2xl overflow-hidden border border-white/10 bg-white/[0.06] backdrop-blur-md transition hover:border-white/25 active:scale-[0.98]">
+              className="text-left rounded-2xl overflow-hidden border border-white/10 bg-white/[0.08] transition hover:border-white/25 active:scale-[0.98]">
               <div className={'aspect-[4/3] bg-gradient-to-br ' + p.color} />
               <div className="p-3">
                 <p className="text-[14px] font-semibold">{p.name}</p>
@@ -1045,7 +1108,7 @@ function MerchApp() {
                     <div key={m.id} role="button" tabIndex={0}
                       onClick={() => setSelected(m)}
                       onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelected(m); } }}
-                      className={'cursor-pointer text-left overflow-hidden rounded-2xl border border-white/10 bg-white/[0.06] backdrop-blur-md transition hover:border-white/25 active:scale-[0.98] ' + (outOfStock ? 'opacity-60' : '')}>
+                      className={'cursor-pointer text-left overflow-hidden rounded-2xl border border-white/10 bg-white/[0.08] transition hover:border-white/25 active:scale-[0.98] ' + (outOfStock ? 'opacity-60' : '')}>
                       <div className="relative aspect-square overflow-hidden">
                         <ProductVisual product={m} className="h-full" />
                         {outOfStock && (
@@ -1170,7 +1233,7 @@ function CartPanel({ open, onClose, cart, cartTotal, removeFromCart, setQty, che
           <motion.aside key="cart-panel"
             initial={{ x:'100%' }} animate={{ x:0 }} exit={{ x:'100%' }}
             transition={{ type:'spring', stiffness:320, damping:38 }}
-            className="fixed right-0 bottom-0 z-[70] flex w-full max-w-[420px] flex-col bg-neutral-950/95 backdrop-blur-xl border-l border-white/10"
+            className="fixed right-0 bottom-0 z-[70] flex w-full max-w-[420px] flex-col bg-neutral-950 border-l border-white/10"
             style={{ top:'calc(max(env(safe-area-inset-top),12px) + 44px)' }}>
             <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
               <h2 className="text-[18px] font-semibold">{checkoutStage ? 'Checkout' : 'Your cart'}</h2>
@@ -2280,7 +2343,7 @@ function InventoryApp() {
 }
 
 const appViews = {
-  about:AboutApp, contact:ContactApp, services:ServicesApp, portfolio:PortfolioApp,
+  about:AboutApp, contact:ContactApp, services:ServicesApp,
   merch:MerchApp, legal:LegalApp, blog:BlogApp, settings:SettingsApp,
   support:SupportApp, music:MusicApp, calendar:CalendarApp, inventory:InventoryApp,
   'project-a':makeProjectApp('project-a'),
@@ -2447,18 +2510,18 @@ function Orb({ color, size, x, y, dx, dy, duration, delay = 0 }) {
   );
 }
 
-function Wallpaper({ theme, dimmed }) {
+function Wallpaper({ theme, appDimmed, folderDimmed }) {
   const css = theme.wallpaper;
   const orbs = theme.orbs || ['#ffffff','#ffffff','#ffffff'];
+  const showOrbs = !appDimmed;
+  const showDim = appDimmed || folderDimmed;
   return (
     <motion.div key={theme.id} initial={{ opacity:0 }} animate={{ opacity:1 }}
       transition={{ duration:0.8, ease:[0.22,1,0.36,1] }}
       className="absolute inset-0 overflow-hidden" style={{ background:css }}>
 
-      {/* Animated decoration only renders while no app is open. The wallpaper is
-          fully covered by the AppView during/after morph, so unmounting these
-          frees GPU/paint work and removes contention with the morph spring. */}
-      {!dimmed && (
+      {/* Orbs stay mounted when only a folder is open — unmounting them rebakes dock/folder layers. */}
+      {showOrbs && (
         <>
           <Orb color={orbs[0]} size={520} x="-10%" y="-5%"  dx={140} dy={90}  duration={26} />
           <Orb color={orbs[1]} size={460} x="55%"  y="15%"  dx={-120} dy={120} duration={32} delay={4} />
@@ -2478,10 +2541,10 @@ function Wallpaper({ theme, dimmed }) {
         style={{ backgroundImage:"url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>\")" }} />
 
       <AnimatePresence>
-        {dimmed && (
+        {showDim && (
           <motion.div key="dim"
-            initial={{ opacity:0 }} animate={{ opacity:0.35 }} exit={{ opacity:0 }}
-            transition={{ duration:0.30, ease:[0.32,0.72,0,1] }}
+            initial={{ opacity:0 }} animate={{ opacity: appDimmed ? 0.35 : 0.28 }} exit={{ opacity:0 }}
+            transition={{ duration:0.18, ease:[0.32,0.72,0,1] }}
             className="absolute inset-0 bg-black" />
         )}
       </AnimatePresence>
@@ -2493,6 +2556,95 @@ function Wallpaper({ theme, dimmed }) {
 const APP_TILE_SIZE = 62;
 // px integers only on layoutId nodes — rem/% or animated radius breaks mobile Chrome layout morph.
 const APP_TILE_RADIUS_PX = Math.round(APP_TILE_SIZE * 0.28);
+
+function FolderIcon({ folder, apps, onOpen, showLabel = true, size = APP_TILE_SIZE }) {
+  const pad = Math.round(size * 0.1);
+  const gap = 3;
+  const cell = Math.floor((size - pad * 2 - gap) / 2);
+  const radius = Math.round(size * 0.22);
+  const miniRadius = Math.round(cell * 0.28);
+  const miniFont = Math.max(10, Math.round(cell * 0.42));
+  return (
+    <button type="button" onClick={() => onOpen(folder)} aria-label={'Open ' + folder.label + ' folder'}
+      className="group flex flex-col items-center gap-1.5 outline-none focus-visible:ring-2 focus-visible:ring-white/70 rounded-2xl">
+      <div className="icon-shadow relative overflow-hidden"
+        style={{
+          width: size,
+          height: size,
+          borderRadius: radius,
+          background: 'rgba(255,255,255,0.24)',
+          boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.18)',
+        }}>
+        <div className="absolute grid grid-cols-2"
+          style={{ left: pad, top: pad, gap, width: size - pad * 2, height: size - pad * 2 }}>
+          {apps.slice(0, 4).map((app) => (
+            <div key={app.id} className="relative overflow-hidden"
+              style={{ width: cell, height: cell, borderRadius: miniRadius, background: app.tile }}>
+              <span className="pointer-events-none absolute inset-0"
+                style={{ background: 'linear-gradient(180deg,rgba(255,255,255,0.22) 0%,rgba(255,255,255,0) 40%,rgba(0,0,0,0.12) 100%)' }} />
+              <div className="absolute inset-0 grid place-items-center leading-none text-white"
+                style={{ fontSize: miniFont }}>{app.glyph}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+      {showLabel && (
+        <span className="text-[13px] font-semibold leading-tight text-white drop-shadow-[0_1px_3px_rgba(0,0,0,0.7)]">
+          {folder.label}
+        </span>
+      )}
+    </button>
+  );
+}
+
+function AppFolderOverlay() {
+  const { openFolderId, closeFolder, openApp, screenApps } = useDevice();
+  const folder = openFolderId === PROJECT_FOLDER_ID ? projectsFolderMeta : null;
+  const apps = folder ? folderChildApps(folder, screenApps) : [];
+
+  return (
+    <AnimatePresence>
+      {openFolderId && folder && (
+        <div key="folder-overlay" className="absolute inset-0 z-[35]">
+          <motion.button
+            type="button"
+            aria-label="Close folder"
+            className="absolute inset-0 bg-black/40"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.16 }}
+            onClick={closeFolder}
+          />
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-8">
+            <motion.div
+              role="dialog"
+              aria-label={folder.label}
+              className="frosted-panel pointer-events-auto relative z-10 w-full max-w-[320px] rounded-[32px] px-7 pb-7 pt-5"
+              initial={{ scale: 0.94 }}
+              animate={{ scale: 1 }}
+              exit={{ scale: 0.96 }}
+              transition={{ type: 'spring', stiffness: 420, damping: 34 }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <p className="mb-6 text-center text-[17px] font-semibold tracking-tight text-white">{folder.label}</p>
+              <div className="grid grid-cols-3 justify-items-center gap-x-6 gap-y-6">
+                {apps.map((app) => (
+                  <AppIcon
+                    key={app.id}
+                    app={app}
+                    onTap={(a) => { closeFolder(); openApp(a.id); }}
+                    size={64}
+                  />
+                ))}
+              </div>
+            </motion.div>
+          </div>
+        </div>
+      )}
+    </AnimatePresence>
+  );
+}
 
 function AppIcon({ app, onTap, showLabel = true, size = APP_TILE_SIZE }) {
   const { shellAppId } = useDevice();
@@ -2523,8 +2675,26 @@ function AppIcon({ app, onTap, showLabel = true, size = APP_TILE_SIZE }) {
 
 const PAGE_SIZE = 20; // 4 cols x 5 rows per page
 
+function buildHomePages(orderedApps) {
+  const pinned = [];
+  const regular = [];
+  for (const item of orderedApps) {
+    if (item.homePage === 2) pinned.push(item);
+    else regular.push(item);
+  }
+  const pages = [];
+  const pageCount = Math.max(1, Math.ceil(regular.length / PAGE_SIZE));
+  for (let i = 0; i < pageCount; i++) {
+    pages.push(regular.slice(i * PAGE_SIZE, (i + 1) * PAGE_SIZE));
+  }
+  if (pinned.length) pages.push(pinned);
+  const last = pages[pages.length - 1];
+  if (last && last.length >= PAGE_SIZE) pages.push([]);
+  return pages;
+}
+
 function HomeGrid() {
-  const { openApp, setHomePage, appOrder, auth, screenApps } = useDevice();
+  const { openApp, openFolder, setHomePage, appOrder, auth, screenApps } = useDevice();
   const scrollerRef = React.useRef(null);
 
   const orderedApps = React.useMemo(
@@ -2532,13 +2702,7 @@ function HomeGrid() {
     [appOrder, screenApps.home],
   );
 
-  const fullPages = Math.ceil(orderedApps.length / PAGE_SIZE) || 0;
-  const pages = React.useMemo(() => {
-    const out = [];
-    for (let i = 0; i < fullPages; i++) out.push(orderedApps.slice(i * PAGE_SIZE, (i + 1) * PAGE_SIZE));
-    out.push([]);
-    return out;
-  }, [fullPages, orderedApps]);
+  const pages = React.useMemo(() => buildHomePages(orderedApps), [orderedApps]);
 
   const onScroll = React.useCallback(() => {
     const el = scrollerRef.current;
@@ -2618,9 +2782,18 @@ function HomeGrid() {
                   </div>
                 ) : (
                   <div className="grid grid-cols-4 gap-x-6 gap-y-5">
-                    {apps.map((app) => (
-                      <div key={app.id} className="flex justify-center">
-                        <AppIcon app={app} onTap={a => openApp(a.id)} size={70} />
+                    {apps.map((item) => (
+                      <div key={item.id} className="flex justify-center">
+                        {item.kind === 'folder' ? (
+                          <FolderIcon
+                            folder={item}
+                            apps={folderChildApps(item, screenApps)}
+                            onOpen={(f) => openFolder(f.id)}
+                            size={70}
+                          />
+                        ) : (
+                          <AppIcon app={item} onTap={a => openApp(a.id)} size={70} />
+                        )}
                       </div>
                     ))}
                   </div>
@@ -2637,9 +2810,7 @@ function HomeGrid() {
 /* Reusable dots, driven by context. */
 function PageDots() {
   const { homePage, setHomePage, appOrder, auth, screenApps } = useDevice();
-  const visibleCount = resolveHomeApps(appOrder, screenApps.home).length;
-  const fullPages = Math.ceil(visibleCount / PAGE_SIZE) || 0;
-  const total = fullPages + 1;
+  const total = buildHomePages(resolveHomeApps(appOrder, screenApps.home)).length;
   const scrollTo = (idx) => {
     setHomePage(idx);
     // Smooth-scroll the scroller; find it by traversing from document
@@ -2662,7 +2833,7 @@ function Dock() {
   return (
     <div className="px-6 pb-2">
       <div className="mx-auto w-full max-w-2xl">
-        <div className="glass-liquid rounded-[36px] px-6 py-4">
+        <div className="frosted-dock rounded-[36px] px-6 py-4">
           <div className="flex items-end justify-around gap-2">
             {screenApps.dock.map(app => (
               <AppIcon key={app.id} app={app} onTap={a => openApp(a.id)} showLabel={true} size={62} />
@@ -2805,7 +2976,7 @@ function AppView({ app, isOpen, onClose, onExitComplete }) {
           <div className="flex min-w-0 items-center gap-2" aria-label={app.label}>
             {fromApp && (
               <button onClick={() => openApp(fromApp.id)} aria-label={'Back to ' + fromApp.label}
-                className="flex shrink-0 items-center gap-1 rounded-full bg-white/15 px-2.5 py-1 text-[12px] font-medium text-white backdrop-blur-md transition hover:bg-white/25 active:scale-95">
+                className="flex shrink-0 items-center gap-1 rounded-full bg-white/15 px-2.5 py-1 text-[12px] font-medium text-white transition hover:bg-white/25 active:scale-95">
                 <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M15 18l-6-6 6-6" />
                 </svg>
@@ -2815,7 +2986,7 @@ function AppView({ app, isOpen, onClose, onExitComplete }) {
             <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl text-[20px]" style={{ background:app.tile }} aria-hidden>{app.glyph}</div>
           </div>
           <button type="button" onClick={onClose} aria-label="Close"
-            className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-white/15 text-white backdrop-blur-md transition hover:bg-white/25 active:scale-90">
+            className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-white/15 text-white transition hover:bg-white/25 active:scale-90">
             <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
               <path d="M6 6 L18 18 M18 6 L6 18" />
             </svg>
@@ -3292,7 +3463,7 @@ function MiniPlayer() {
 
 /* ========================= DEVICE ROOT ========================= */
 function Device() {
-  const { themeId, openAppId, shellAppId, closeApp, handleShellExitComplete, audioRef, findApp: resolveApp } = useDevice();
+  const { themeId, openAppId, openFolderId, shellAppId, closeApp, closeFolder, handleShellExitComplete, audioRef, findApp: resolveApp } = useDevice();
   const theme = themes[themeId];
 
   const shellApp = shellAppId ? resolveApp(shellAppId) : null;
@@ -3300,7 +3471,7 @@ function Device() {
 
   return (
     <div className="relative h-full w-full overflow-hidden font-sf">
-      <Wallpaper theme={theme} dimmed={!!openAppId} />
+      <Wallpaper theme={theme} appDimmed={!!openAppId} folderDimmed={!!openFolderId && !openAppId} />
       <LayoutGroup>
         <div className="pointer-events-none absolute inset-x-0 top-0 z-50">
           {/* Top scrim: near-solid black at the status bar, fades to 0 at the bottom. */}
@@ -3321,8 +3492,9 @@ function Device() {
           {/* Page indicator dots above the dock */}
           <PageDots />
           <Dock />
-          <HomeIndicator onClick={openAppId ? closeApp : undefined} />
+          <HomeIndicator onClick={openFolderId ? closeFolder : openAppId ? closeApp : undefined} />
         </div>
+        <AppFolderOverlay />
         {shellApp && (
           <AppView
             key={shellAppId}

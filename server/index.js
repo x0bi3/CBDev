@@ -15,6 +15,7 @@ import { pool } from './db.js';
 import { ensureUploadDirs } from './lib/uploads.js';
 import { startBlogIdeasScheduler } from './lib/blogIdeasScheduler.js';
 import { migrateBlogBodyToHtml } from './lib/blogMigrate.js';
+import { createOdysseusProxy, CHAT_PREFIX } from './lib/odysseusProxy.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, '..');
@@ -78,6 +79,9 @@ app.use('/api/calendar', calendarRoutes);
 app.use('/api/home', homeRoutes);
 app.use('/api/admin', adminRoutes);
 
+// Odysseus AI workspace — proxied for mobile access at creativebuilds.dev/chat
+app.use(CHAT_PREFIX, createOdysseusProxy());
+
 if (existsSync(adminDist)) {
   app.use((req, res, next) => {
     if (!isAdminHost(req)) return next();
@@ -112,6 +116,7 @@ if (existsSync(distDir)) {
   });
   app.get('*', (req, res, next) => {
     if (req.path.startsWith('/api')) return next();
+    if (req.path === CHAT_PREFIX || req.path.startsWith(`${CHAT_PREFIX}/`)) return next();
     if (isAdminHost(req)) {
       if (existsSync(adminDist)) {
         res.set('Cache-Control', 'no-cache, no-store, must-revalidate');

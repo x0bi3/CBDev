@@ -2,7 +2,6 @@ import type { AppDefinition } from '../types';
 import { AboutApp } from '../components/apps/AboutApp';
 import { ContactApp } from '../components/apps/ContactApp';
 import { ServicesApp } from '../components/apps/ServicesApp';
-import { PortfolioApp } from '../components/apps/PortfolioApp';
 import { MerchApp } from '../components/apps/MerchApp';
 import { ProjectApp } from '../components/apps/ProjectApp';
 import { LegalApp } from '../components/apps/LegalApp';
@@ -47,13 +46,6 @@ export const homeApps: AppDefinition[] = [
     view: BlogApp,
   },
   {
-    id: 'legal',
-    label: 'Legal',
-    tile: 'linear-gradient(135deg,#94a3b8,#1e293b)',
-    glyph: '⚖️',
-    view: LegalApp,
-  },
-  {
     id: 'github',
     label: 'GitHub',
     tile: 'linear-gradient(135deg,#1f2937,#000000)',
@@ -70,6 +62,14 @@ export const homeApps: AppDefinition[] = [
     tile: 'linear-gradient(135deg,#9ca3af,#374151)',
     glyph: '⚙️',
     view: SettingsApp,
+  },
+  {
+    id: 'legal',
+    label: 'Legal',
+    tile: 'linear-gradient(135deg,#94a3b8,#1e293b)',
+    glyph: '⚖️',
+    view: LegalApp,
+    homePage: 2,
   },
 ];
 
@@ -90,11 +90,10 @@ export const dockApps: AppDefinition[] = [
     view: ServicesApp,
   },
   {
-    id: 'portfolio',
-    label: 'Portfolio',
-    tile: 'linear-gradient(135deg,#10b981,#065f46)',
-    glyph: '💼',
-    view: PortfolioApp,
+    id: 'support',
+    label: 'Support',
+    tile: 'linear-gradient(135deg,#38bdf8,#1e3a8a)',
+    glyph: '🛠️',
   },
   {
     id: 'contact',

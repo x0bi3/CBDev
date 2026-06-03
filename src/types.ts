@@ -4,8 +4,8 @@ export type AppId =
   | 'about'
   | 'contact'
   | 'services'
-  | 'portfolio'
   | 'merch'
+  | 'support'
   | 'project-a'
   | 'project-b'
   | 'project-c'
@@ -25,6 +25,8 @@ export interface AppDefinition {
   href?: string;
   /** App body component */
   view?: ComponentType;
+  /** Pin to a specific home screen page (e.g. 2 = second swipe page). */
+  homePage?: number;
 }
 
 export type ThemeId = 'liquid-glass' | 'sunset' | 'midnight' | 'aqua';

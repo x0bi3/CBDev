@@ -6,18 +6,19 @@ import { StatusBar } from './StatusBar';
 import { HomeIndicator } from './HomeIndicator';
 import { HomeGrid } from './ios/HomeGrid';
 import { Dock } from './ios/Dock';
+import { AppFolderOverlay } from './ios/AppFolderOverlay';
 import { AppView } from './ios/AppView';
 import { ControlCenter } from './ios/ControlCenter';
 import { getAppById } from '../data/apps';
 
 export function Device() {
-  const { themeId, openAppId, closeApp } = useDevice();
+  const { themeId, openAppId, openFolderId, closeApp, closeFolder } = useDevice();
   const theme = themes[themeId];
   const openApp = openAppId ? getAppById(openAppId) : undefined;
 
   return (
     <div className="relative h-full w-full overflow-hidden font-sf">
-      <Wallpaper css={theme.wallpaper} dimmed={!!openAppId} />
+      <Wallpaper css={theme.wallpaper} dimmed={!!openAppId || !!openFolderId} />
 
       <LayoutGroup>
         {/* Status bar — always on top */}
@@ -40,8 +41,10 @@ export function Device() {
             <HomeGrid />
           </div>
           <Dock />
-          <HomeIndicator onClick={openAppId ? closeApp : undefined} />
+          <HomeIndicator onClick={openFolderId ? closeFolder : openAppId ? closeApp : undefined} />
         </div>
+
+        <AppFolderOverlay />
 
         {/* Foreground app view */}
         <AnimatePresence>

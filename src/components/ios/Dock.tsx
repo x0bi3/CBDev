@@ -8,7 +8,7 @@ export function Dock() {
   return (
     <div className="px-4 pb-2">
       <div className="mx-auto max-w-md">
-        <div className="glass-liquid rounded-[32px] px-3 py-3">
+        <div className="frosted-dock rounded-[32px] px-3 py-3">
           <div className="flex items-center justify-around">
             {dockApps.map((app) => (
               <AppIcon
