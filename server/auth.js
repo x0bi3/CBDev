@@ -83,9 +83,24 @@ export async function findUserById(id) {
   return rows[0] || null;
 }
 
-function attachUserFromToken(req) {
+function readSessionToken(req) {
   const header = req.headers.authorization || '';
-  const token = header.startsWith('Bearer ') ? header.slice(7) : null;
+  if (header.startsWith('Bearer ')) return header.slice(7);
+  const raw = req.headers.cookie || '';
+  for (const part of raw.split(';')) {
+    const trimmed = part.trim();
+    if (!trimmed) continue;
+    const eq = trimmed.indexOf('=');
+    if (eq === -1) continue;
+    if (trimmed.slice(0, eq).trim() === 'cbdev_token') {
+      return decodeURIComponent(trimmed.slice(eq + 1).trim());
+    }
+  }
+  return null;
+}
+
+function attachUserFromToken(req) {
+  const token = readSessionToken(req);
   if (!token) return false;
   try {
     const payload = verifyToken(token);

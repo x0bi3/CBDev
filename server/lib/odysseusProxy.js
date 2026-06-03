@@ -1,6 +1,6 @@
 import http from 'node:http';
 import { findUserByUsername, signToken } from '../auth.js';
-import { setCbdevTokenCookie } from './odysseusAuth.js';
+import { formatCbdevTokenCookie } from './odysseusAuth.js';
 
 const CHAT_PREFIX = '/chat';
 const TARGET = process.env.ODYSSEUS_URL || 'http://127.0.0.1:7000';
@@ -31,9 +31,28 @@ function rewriteBody(body, contentType) {
     .replace(/="\/(?!chat\/)/g, `="${CHAT_PREFIX}/`)
     .replace(/='\/(?!chat\/)/g, `='${CHAT_PREFIX}/`)
     .replace(/\(\/(?!chat\/)/g, `(${CHAT_PREFIX}/`)
-    .replace(/url\(\/(?!chat\/)/g, `url(${CHAT_PREFIX}/`);
+    .replace(/url\(\/(?!chat\/)/g, `url(${CHAT_PREFIX}/`)
+    .replace(
+      /window\.location\.(replace|assign)\s*\(\s*['"]\/?['"]\s*\)/gi,
+      `window.location.$1('${CHAT_PREFIX}/')`,
+    );
 
   return Buffer.from(text, 'utf8');
+}
+
+function normalizeSetCookies(value) {
+  if (!value) return [];
+  return Array.isArray(value) ? value : [value];
+}
+
+function mergeSetCookies(outHeaders, res, extra = []) {
+  const merged = [
+    ...normalizeSetCookies(outHeaders['set-cookie']),
+    ...normalizeSetCookies(res.getHeader('Set-Cookie')),
+    ...extra,
+  ];
+  delete outHeaders['set-cookie'];
+  if (merged.length) outHeaders['set-cookie'] = merged;
 }
 
 function rewriteLocation(value) {
@@ -88,6 +107,7 @@ export function createOdysseusProxy() {
 
           if (isEventStream) {
             delete outHeaders['content-length'];
+            mergeSetCookies(outHeaders, res);
             res.writeHead(proxyRes.statusCode || 200, outHeaders);
             proxyRes.pipe(res);
             return;
@@ -99,6 +119,7 @@ export function createOdysseusProxy() {
             outHeaders['content-length'] = String(rewritten.length);
           }
 
+          const extraCookies = [];
           // Odysseus login at /chat → also issue CreativeBuilds session cookie
           if (
             req.method === 'POST'
@@ -109,13 +130,14 @@ export function createOdysseusProxy() {
               const data = JSON.parse(body.toString('utf8'));
               if (data.ok && data.username) {
                 const row = await findUserByUsername(data.username);
-                if (row) setCbdevTokenCookie(res, signToken(row));
+                if (row) extraCookies.push(formatCbdevTokenCookie(signToken(row)));
               }
             } catch {
               // ignore malformed login responses
             }
           }
 
+          mergeSetCookies(outHeaders, res, extraCookies);
           res.writeHead(proxyRes.statusCode || 200, outHeaders);
           res.end(rewritten);
         } catch (err) {

@@ -55,17 +55,29 @@ export function readCbdevToken(req) {
   return null;
 }
 
-export function setCbdevTokenCookie(res, token) {
+function cookieParts(name, value, maxAge) {
   const secure = process.env.NODE_ENV === 'production';
   const parts = [
-    `${CB_TOKEN_COOKIE}=${encodeURIComponent(token)}`,
+    `${name}=${encodeURIComponent(value)}`,
     'Path=/',
     'HttpOnly',
     'SameSite=Lax',
-    `Max-Age=${TOKEN_TTL_SEC}`,
+    `Max-Age=${maxAge}`,
   ];
   if (secure) parts.push('Secure');
-  res.append('Set-Cookie', parts.join('; '));
+  return parts.join('; ');
+}
+
+export function formatCbdevTokenCookie(token) {
+  return cookieParts(CB_TOKEN_COOKIE, token, TOKEN_TTL_SEC);
+}
+
+export function formatOdysseusSessionCookie(token) {
+  return cookieParts(SESSION_COOKIE, token, TOKEN_TTL_SEC);
+}
+
+export function setCbdevTokenCookie(res, token) {
+  res.append('Set-Cookie', formatCbdevTokenCookie(token));
 }
 
 export function clearCbdevTokenCookie(res) {
@@ -82,16 +94,7 @@ export function clearCbdevTokenCookie(res) {
 }
 
 function setOdysseusSessionCookie(res, token) {
-  const secure = process.env.NODE_ENV === 'production';
-  const parts = [
-    `${SESSION_COOKIE}=${encodeURIComponent(token)}`,
-    'Path=/',
-    'HttpOnly',
-    'SameSite=Lax',
-    `Max-Age=${TOKEN_TTL_SEC}`,
-  ];
-  if (secure) parts.push('Secure');
-  res.append('Set-Cookie', parts.join('; '));
+  res.append('Set-Cookie', formatOdysseusSessionCookie(token));
 }
 
 function runOdysseusSso(payload) {

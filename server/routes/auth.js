@@ -9,6 +9,7 @@ import {
   hashPassword,
   verifyPassword,
   signToken,
+  verifyToken,
   userPayload,
   normalizeUsername,
   isValidUsername,
@@ -124,6 +125,25 @@ router.post('/session-cookie', async (req, res) => {
   }
   setCbdevTokenCookie(res, token);
   res.json({ ok: true });
+});
+
+router.get('/bootstrap', async (req, res) => {
+  const token = readCbdevToken(req);
+  if (!token) {
+    res.status(401).json({ error: 'Authentication required' });
+    return;
+  }
+  try {
+    const payload = verifyToken(token);
+    const row = await findUserById(payload.sub);
+    if (!row) {
+      res.status(401).json({ error: 'Authentication required' });
+      return;
+    }
+    res.json({ user: userPayload(row), token });
+  } catch {
+    res.status(401).json({ error: 'Authentication required' });
+  }
 });
 
 router.post('/reset/request', async (req, res) => {

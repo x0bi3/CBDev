@@ -84,6 +84,7 @@ async function api(path, opts = {}) {
   const res = await fetch('/api' + path, {
     method,
     headers,
+    credentials: 'same-origin',
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
   let data = {};
@@ -249,16 +250,26 @@ function DeviceProvider({ children }) {
   }, [auth]);
 
   useEffect(() => {
-    const token = localStorage.getItem(API_TOKEN_KEY);
-    if (!token) return;
-    api('/auth/me')
-      .then((r) => { if (r.user) setAuthState(r.user); })
-      .catch(() => {
+    (async () => {
+      try {
+        const token = localStorage.getItem(API_TOKEN_KEY);
+        if (token) {
+          const r = await api('/auth/me');
+          if (r.user) setAuthState(r.user);
+          api('/auth/session-cookie', { method: 'POST' }).catch(() => {});
+          return;
+        }
+        const res = await fetch('/api/auth/bootstrap', { credentials: 'same-origin' });
+        if (!res.ok) return;
+        const r = await res.json();
+        if (r.token) localStorage.setItem(API_TOKEN_KEY, r.token);
+        if (r.user) setAuthState(r.user);
+      } catch {
         localStorage.removeItem(API_TOKEN_KEY);
         localStorage.removeItem('iphone-portfolio:auth');
         setAuthState(null);
-      });
-    api('/auth/session-cookie', { method: 'POST' }).catch(() => {});
+      }
+    })();
   }, []);
 
   const openFolder = useCallback((id) => setOpenFolderId(id), []);
