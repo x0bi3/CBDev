@@ -12,6 +12,9 @@ sys.path.insert(0, str(ROOT))
 from dotenv import load_dotenv
 
 load_dotenv(encoding="utf-8-sig")
+# cbdev_sso runs as a subprocess of the Node server, which exports Postgres
+# DATABASE_URL for CreativeBuilds. Force Odysseus back to its local SQLite store.
+os.environ["DATABASE_URL"] = "sqlite:///./data/app.db"
 
 from core.auth import AuthManager  # noqa: E402
 

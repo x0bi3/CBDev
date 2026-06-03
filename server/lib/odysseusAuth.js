@@ -99,6 +99,10 @@ function runOdysseusSso(payload) {
     const child = spawn(PYTHON, [SSO_SCRIPT], {
       cwd: ODYSSEUS_ROOT,
       stdio: ['pipe', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        DATABASE_URL: 'sqlite:///./data/app.db',
+      },
     });
     let stdout = '';
     let stderr = '';
