@@ -6,8 +6,10 @@ import { query } from '../db.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ODYSSEUS_ROOT = process.env.ODYSSEUS_ROOT || '/home/pi/Desktop/Odysseus';
+const ODYSSEUS_URL = process.env.ODYSSEUS_URL || 'http://127.0.0.1:7000';
 const SSO_SCRIPT = resolve(ODYSSEUS_ROOT, 'scripts/cbdev_sso.py');
 const PYTHON = process.env.ODYSSEUS_PYTHON || resolve(ODYSSEUS_ROOT, 'venv/bin/python');
+const INTERNAL_TOKEN = process.env.ODYSSEUS_INTERNAL_TOKEN || '';
 
 const SESSION_COOKIE = 'odysseus_session';
 const CB_TOKEN_COOKIE = 'cbdev_token';
@@ -97,7 +99,7 @@ function setOdysseusSessionCookie(res, token) {
   res.append('Set-Cookie', formatOdysseusSessionCookie(token));
 }
 
-function runOdysseusSso(payload) {
+function runOdysseusSsoSubprocess(payload) {
   return new Promise((resolvePromise, reject) => {
     const child = spawn(PYTHON, [SSO_SCRIPT], {
       cwd: ODYSSEUS_ROOT,
@@ -127,6 +129,25 @@ function runOdysseusSso(payload) {
   });
 }
 
+async function runOdysseusSso(payload) {
+  if (!INTERNAL_TOKEN) {
+    return runOdysseusSsoSubprocess(payload);
+  }
+  const res = await fetch(`${ODYSSEUS_URL}/api/auth/cbdev-sso`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Odysseus-Internal-Token': INTERNAL_TOKEN,
+    },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`cbdev-sso HTTP ${res.status}: ${text}`);
+  }
+  return res.json();
+}
+
 export function odysseusUsernameForUser(userRow) {
   const explicit = normalizeUsername(userRow?.username);
   if (explicit) return explicit;
@@ -148,8 +169,16 @@ export async function syncUserToOdysseus(userRow) {
 }
 
 async function checkOdysseusSession(token, expectedUsername) {
-  const result = await runOdysseusSso({ action: 'check', token });
-  return result.ok && result.username === expectedUsername;
+  if (INTERNAL_TOKEN) {
+    const result = await runOdysseusSso({ action: 'check', token });
+    return result.ok && result.username === expectedUsername;
+  }
+  const res = await fetch(`${ODYSSEUS_URL}/api/auth/status`, {
+    headers: { Cookie: `${SESSION_COOKIE}=${token}` },
+  });
+  if (!res.ok) return false;
+  const data = await res.json();
+  return data.authenticated === true && data.username === expectedUsername;
 }
 
 async function createOdysseusSession(username) {

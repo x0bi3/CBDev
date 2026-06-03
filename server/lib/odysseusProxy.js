@@ -5,8 +5,6 @@ import { formatCbdevTokenCookie } from './odysseusAuth.js';
 const CHAT_PREFIX = '/chat';
 const TARGET = process.env.ODYSSEUS_URL || 'http://127.0.0.1:7000';
 
-const INJECT_SCRIPT = `<script>(function(){var P='${CHAT_PREFIX}';function rw(u){if(typeof u!=='string')return u;if(u.startsWith(P+'/')||u===P)return u;try{var o=new URL(u,location.origin);if(o.origin===location.origin&&o.pathname.startsWith('/')&&!o.pathname.startsWith(P)){o.pathname=P+o.pathname;return o.toString();}}catch(e){}if(u.startsWith('/')&&!u.startsWith(P))return P+u;return u;}var f=window.fetch;window.fetch=function(i,n){if(typeof i==='string')i=rw(i);else if(i&&i.url)i=new Request(rw(i.url),i);return f.call(this,i,n);};var ES=window.EventSource;window.EventSource=function(u,o){return new ES(rw(u),o);};var op=window.open;window.open=function(u,t,f){if(typeof u==='string')u=rw(u);return op.call(window,u,t,f);};try{var LP=Location.prototype,A=LP.assign,R=LP.replace;LP.assign=function(u){return A.call(this,rw(u));};LP.replace=function(u){return R.call(this,rw(u));};var hd=Object.getOwnPropertyDescriptor(LP,'href');if(hd&&hd.set){var gs=hd.get,ss=hd.set;Object.defineProperty(LP,'href',{get:gs,set:function(v){ss.call(this,rw(v));},configurable:true,enumerable:true});}}catch(e){}})();</script>`;
-
 const REWRITE_TYPES = new Set([
   'text/html',
   'text/css',
@@ -21,13 +19,9 @@ function rewriteBody(body, contentType) {
   if (!REWRITE_TYPES.has(baseType)) return body;
 
   let text = body.toString('utf8');
-  if (baseType === 'text/html') {
-    text = text.includes('<head>')
-      ? text.replace('<head>', `<head>${INJECT_SCRIPT}`)
-      : INJECT_SCRIPT + text;
-  }
 
   text = text
+    .replace(/(['"`])\/(?!chat\/)/g, `$1${CHAT_PREFIX}/`)
     .replace(/="\/(?!chat\/)/g, `="${CHAT_PREFIX}/`)
     .replace(/='\/(?!chat\/)/g, `='${CHAT_PREFIX}/`)
     .replace(/\(\/(?!chat\/)/g, `(${CHAT_PREFIX}/`)
