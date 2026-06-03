@@ -258,6 +258,7 @@ function DeviceProvider({ children }) {
         localStorage.removeItem('iphone-portfolio:auth');
         setAuthState(null);
       });
+    api('/auth/session-cookie', { method: 'POST' }).catch(() => {});
   }, []);
 
   const openFolder = useCallback((id) => setOpenFolderId(id), []);
@@ -3281,6 +3282,7 @@ function AuthSheet() {
   };
 
   const signOut = () => {
+    api('/auth/logout', { method: 'POST', auth: false }).catch(() => {});
     localStorage.removeItem(API_TOKEN_KEY);
     setAuth(null);
     setStatus({ type:'ok', msg:'Signed out.' });

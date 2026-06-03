@@ -10,6 +10,12 @@ import {
   userPayload,
   requireAuth,
 } from '../auth.js';
+import {
+  syncUserToOdysseus,
+  setCbdevTokenCookie,
+  clearCbdevTokenCookie,
+  readCbdevToken,
+} from '../lib/odysseusAuth.js';
 
 const router = Router();
 
@@ -41,11 +47,13 @@ router.post('/register', async (req, res) => {
     const passwordHash = await hashPassword(password);
     const { rows } = await query(
       `INSERT INTO users (email, name, password_hash) VALUES ($1, $2, $3)
-       RETURNING id, email, name, role, created_at`,
+       RETURNING id, email, name, password_hash, role, created_at`,
       [email, name, passwordHash],
     );
     const user = userPayload(rows[0]);
     const token = signToken(rows[0]);
+    setCbdevTokenCookie(res, token);
+    await syncUserToOdysseus(rows[0]);
     res.status(201).json({ user, token });
   } catch (err) {
     console.error('auth register:', err);
@@ -66,6 +74,8 @@ router.post('/login', async (req, res) => {
 
     const user = userPayload(row);
     const token = signToken(row);
+    setCbdevTokenCookie(res, token);
+    await syncUserToOdysseus(row);
     res.json({ user, token });
   } catch (err) {
     console.error('auth login:', err);
@@ -85,6 +95,21 @@ router.get('/me', requireAuth, async (req, res) => {
     console.error('auth me:', err);
     res.status(500).json({ error: 'Failed to load user' });
   }
+});
+
+router.post('/logout', (_req, res) => {
+  clearCbdevTokenCookie(res);
+  res.json({ ok: true });
+});
+
+router.post('/session-cookie', async (req, res) => {
+  const token = readCbdevToken(req);
+  if (!token) {
+    res.status(401).json({ error: 'Authentication required' });
+    return;
+  }
+  setCbdevTokenCookie(res, token);
+  res.json({ ok: true });
 });
 
 router.post('/reset/request', async (req, res) => {
@@ -152,6 +177,12 @@ router.post('/reset/confirm', async (req, res) => {
     const passwordHash = await hashPassword(password);
     await query('UPDATE users SET password_hash = $1 WHERE id = $2', [passwordHash, reset.user_id]);
     await query('UPDATE password_resets SET used_at = NOW() WHERE id = $1', [reset.id]);
+
+    const { rows: userRows } = await query(
+      'SELECT id, email, name, password_hash, role, created_at FROM users WHERE id = $1',
+      [reset.user_id],
+    );
+    if (userRows[0]) await syncUserToOdysseus(userRows[0]);
 
     res.json({ ok: true, message: 'Password updated. You can sign in now.' });
   } catch (err) {

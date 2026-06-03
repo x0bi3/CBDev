@@ -16,6 +16,7 @@ import { ensureUploadDirs } from './lib/uploads.js';
 import { startBlogIdeasScheduler } from './lib/blogIdeasScheduler.js';
 import { migrateBlogBodyToHtml } from './lib/blogMigrate.js';
 import { createOdysseusProxy, CHAT_PREFIX } from './lib/odysseusProxy.js';
+import { ensureOdysseusSession } from './lib/odysseusAuth.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, '..');
@@ -80,7 +81,14 @@ app.use('/api/home', homeRoutes);
 app.use('/api/admin', adminRoutes);
 
 // Odysseus AI workspace — proxied for mobile access at creativebuilds.dev/chat
-app.use(CHAT_PREFIX, createOdysseusProxy());
+app.use(CHAT_PREFIX, async (req, res) => {
+  try {
+    await ensureOdysseusSession(req, res);
+  } catch (err) {
+    console.error('odysseus-sso:', err.message);
+  }
+  createOdysseusProxy()(req, res);
+});
 
 if (existsSync(adminDist)) {
   app.use((req, res, next) => {
