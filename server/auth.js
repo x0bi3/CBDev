@@ -15,7 +15,7 @@ export async function verifyPassword(plain, hash) {
 
 export function signToken(user) {
   return jwt.sign(
-    { sub: user.id, email: user.email, role: user.role },
+    { sub: user.id, email: user.email, username: user.username || null, role: user.role },
     JWT_SECRET,
     { expiresIn: JWT_EXPIRES },
   );
@@ -29,23 +29,55 @@ export function userPayload(row) {
   return {
     id: row.id,
     email: row.email,
+    username: row.username || null,
     name: row.name,
     role: row.role,
     createdAt: row.created_at ? new Date(row.created_at).getTime() : Date.now(),
   };
 }
 
+const USER_COLS = 'id, email, username, name, password_hash, role, created_at';
+
+export function normalizeUsername(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_]/g, '')
+    .slice(0, 32);
+}
+
+export function isValidUsername(username) {
+  return /^[a-z0-9_]{1,32}$/.test(username);
+}
+
 export async function findUserByEmail(email) {
   const { rows } = await query(
-    'SELECT id, email, name, password_hash, role, created_at FROM users WHERE email = $1',
+    `SELECT ${USER_COLS} FROM users WHERE email = $1`,
     [email.toLowerCase().trim()],
   );
   return rows[0] || null;
 }
 
+export async function findUserByUsername(username) {
+  const normalized = normalizeUsername(username);
+  if (!normalized) return null;
+  const { rows } = await query(
+    `SELECT ${USER_COLS} FROM users WHERE LOWER(username) = $1`,
+    [normalized],
+  );
+  return rows[0] || null;
+}
+
+export async function findUserByLogin(login) {
+  const value = String(login || '').trim();
+  if (!value) return null;
+  if (value.includes('@')) return findUserByEmail(value.toLowerCase());
+  return findUserByUsername(value);
+}
+
 export async function findUserById(id) {
   const { rows } = await query(
-    'SELECT id, email, name, role, created_at FROM users WHERE id = $1',
+    'SELECT id, email, username, name, role, created_at FROM users WHERE id = $1',
     [id],
   );
   return rows[0] || null;

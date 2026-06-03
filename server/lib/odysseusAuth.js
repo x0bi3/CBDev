@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { verifyToken } from '../auth.js';
+import { verifyToken, normalizeUsername } from '../auth.js';
 import { query } from '../db.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -124,8 +124,14 @@ function runOdysseusSso(payload) {
   });
 }
 
+export function odysseusUsernameForUser(userRow) {
+  const explicit = normalizeUsername(userRow?.username);
+  if (explicit) return explicit;
+  return emailToOdysseusUsername(userRow?.email);
+}
+
 export async function syncUserToOdysseus(userRow) {
-  const username = emailToOdysseusUsername(userRow.email);
+  const username = odysseusUsernameForUser(userRow);
   const result = await runOdysseusSso({
     action: 'sync',
     username,
@@ -150,7 +156,7 @@ async function createOdysseusSession(username) {
 
 async function findUserWithHash(userId) {
   const { rows } = await query(
-    'SELECT id, email, name, password_hash, role FROM users WHERE id = $1',
+    'SELECT id, email, username, name, password_hash, role FROM users WHERE id = $1',
     [userId],
   );
   return rows[0] || null;
@@ -170,7 +176,7 @@ export async function ensureOdysseusSession(req, res) {
   const user = await findUserWithHash(payload.sub);
   if (!user) return false;
 
-  const username = emailToOdysseusUsername(user.email);
+  const username = odysseusUsernameForUser(user);
   const cookies = parseCookies(req);
   const existing = cookies[SESSION_COOKIE];
 

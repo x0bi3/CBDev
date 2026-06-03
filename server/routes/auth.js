@@ -3,11 +3,15 @@ import crypto from 'node:crypto';
 import { query } from '../db.js';
 import {
   findUserByEmail,
+  findUserByUsername,
+  findUserByLogin,
   findUserById,
   hashPassword,
   verifyPassword,
   signToken,
   userPayload,
+  normalizeUsername,
+  isValidUsername,
   requireAuth,
 } from '../auth.js';
 import {
@@ -24,9 +28,14 @@ router.post('/register', async (req, res) => {
     const email = String(req.body.email || '').trim().toLowerCase();
     const name = String(req.body.name || '').trim();
     const password = String(req.body.password || '');
+    const username = normalizeUsername(req.body.username || email.split('@')[0]);
 
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       res.status(400).json({ error: 'Valid email required' });
+      return;
+    }
+    if (!isValidUsername(username)) {
+      res.status(400).json({ error: 'Username must be 1–32 letters, numbers, or underscores' });
       return;
     }
     if (password.length < 6) {
@@ -43,12 +52,17 @@ router.post('/register', async (req, res) => {
       res.status(409).json({ error: 'An account with this email already exists' });
       return;
     }
+    const takenUsername = await findUserByUsername(username);
+    if (takenUsername) {
+      res.status(409).json({ error: 'That username is already taken' });
+      return;
+    }
 
     const passwordHash = await hashPassword(password);
     const { rows } = await query(
-      `INSERT INTO users (email, name, password_hash) VALUES ($1, $2, $3)
-       RETURNING id, email, name, password_hash, role, created_at`,
-      [email, name, passwordHash],
+      `INSERT INTO users (email, username, name, password_hash) VALUES ($1, $2, $3, $4)
+       RETURNING id, email, username, name, password_hash, role, created_at`,
+      [email, username, name, passwordHash],
     );
     const user = userPayload(rows[0]);
     const token = signToken(rows[0]);
@@ -63,12 +77,12 @@ router.post('/register', async (req, res) => {
 
 router.post('/login', async (req, res) => {
   try {
-    const email = String(req.body.email || '').trim().toLowerCase();
+    const login = String(req.body.login || req.body.email || req.body.username || '').trim();
     const password = String(req.body.password || '');
 
-    const row = await findUserByEmail(email);
+    const row = await findUserByLogin(login);
     if (!row || !(await verifyPassword(password, row.password_hash))) {
-      res.status(401).json({ error: 'Invalid email or password' });
+      res.status(401).json({ error: 'Invalid username/email or password' });
       return;
     }
 
@@ -179,7 +193,7 @@ router.post('/reset/confirm', async (req, res) => {
     await query('UPDATE password_resets SET used_at = NOW() WHERE id = $1', [reset.id]);
 
     const { rows: userRows } = await query(
-      'SELECT id, email, name, password_hash, role, created_at FROM users WHERE id = $1',
+      'SELECT id, email, username, name, password_hash, role, created_at FROM users WHERE id = $1',
       [reset.user_id],
     );
     if (userRows[0]) await syncUserToOdysseus(userRows[0]);

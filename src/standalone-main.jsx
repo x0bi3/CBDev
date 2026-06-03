@@ -3238,9 +3238,10 @@ function PopoverHeader({ title, onClose }) {
 function AuthSheet() {
   const { authOpen, closeAuth, auth, setAuth, profileBtnRef } = useDevice();
   const [mode, setMode] = useState('signin');
-  const [email, setEmail] = useState('');
+  const [login, setLogin] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
+  const [username, setUsername] = useState('');
   const [status, setStatus] = useState(null);
 
   useEffect(() => {
@@ -3251,12 +3252,12 @@ function AuthSheet() {
 
   const submit = async (e) => {
     e.preventDefault();
-    const cleanEmail = email.trim().toLowerCase();
-    if (!validEmail(cleanEmail)) { setStatus({ type:'err', msg:'Please enter a valid email address.' }); return; }
+    const cleanLogin = login.trim();
     if (mode === 'reset') {
+      if (!validEmail(cleanLogin)) { setStatus({ type:'err', msg:'Please enter a valid email address.' }); return; }
       try {
-        const r = await api('/auth/reset/request', { auth: false, method: 'POST', body: { email: cleanEmail } });
-        let msg = r.message || ('If an account exists for ' + cleanEmail + ', a reset link is on its way.');
+        const r = await api('/auth/reset/request', { auth: false, method: 'POST', body: { email: cleanLogin.toLowerCase() } });
+        let msg = r.message || ('If an account exists for ' + cleanLogin + ', a reset link is on its way.');
         if (r.devToken) msg += ' (dev token logged to console)';
         setStatus({ type:'ok', msg });
       } catch (err) {
@@ -3264,13 +3265,18 @@ function AuthSheet() {
       }
       return;
     }
+    if (!cleanLogin) { setStatus({ type:'err', msg: mode === 'register' ? 'Email is required.' : 'Enter your username or email.' }); return; }
+    if (mode === 'register' && !validEmail(cleanLogin)) { setStatus({ type:'err', msg:'Please enter a valid email address.' }); return; }
     if (password.length < 6) { setStatus({ type:'err', msg:'Passwords need to be at least 6 characters.' }); return; }
     if (mode === 'register' && !name.trim()) { setStatus({ type:'err', msg:'What should I call you?' }); return; }
+    if (mode === 'register' && !/^[a-z0-9_]{1,32}$/i.test(username.trim())) {
+      setStatus({ type:'err', msg:'Username must be 1–32 letters, numbers, or underscores.' }); return;
+    }
     try {
       const path = mode === 'register' ? '/auth/register' : '/auth/login';
       const body = mode === 'register'
-        ? { email: cleanEmail, name: name.trim(), password }
-        : { email: cleanEmail, password };
+        ? { email: cleanLogin.toLowerCase(), username: username.trim(), name: name.trim(), password }
+        : { login: cleanLogin, password };
       const r = await api(path, { auth: false, method: 'POST', body });
       if (r.token) localStorage.setItem(API_TOKEN_KEY, r.token);
       setAuth(r.user);
@@ -3311,7 +3317,8 @@ function AuthSheet() {
             </div>
             <div className="min-w-0 flex-1">
               <p className="truncate text-[14px] font-semibold">{auth.name || 'Guest'}</p>
-              <p className="truncate text-[12px] text-white/65">{auth.email}</p>
+              <p className="truncate text-[12px] text-white/65">@{auth.username || auth.email.split('@')[0]}</p>
+              <p className="truncate text-[11px] text-white/45">{auth.email}</p>
             </div>
             <span className="rounded-full bg-emerald-400/20 px-2 py-0.5 text-[10px] font-medium text-emerald-200 ring-1 ring-emerald-300/30">Active</span>
           </div>
@@ -3340,9 +3347,20 @@ function AuthSheet() {
                 className="w-full rounded-xl bg-white/10 px-3.5 py-2.5 text-[14px] text-white placeholder-white/40 ring-1 ring-white/15 outline-none transition focus:bg-white/15 focus:ring-white/40" />
             </label>
           )}
+          {mode === 'register' && (
+            <label className="block">
+              <span className="mb-1 block text-[12px] font-medium text-white/70">Username</span>
+              <input value={username} onChange={e => setUsername(e.target.value.toLowerCase())} type="text" autoComplete="username" placeholder="x0bi3"
+                className="w-full rounded-xl bg-white/10 px-3.5 py-2.5 text-[14px] text-white placeholder-white/40 ring-1 ring-white/15 outline-none transition focus:bg-white/15 focus:ring-white/40" />
+            </label>
+          )}
           <label className="block">
-            <span className="mb-1 block text-[12px] font-medium text-white/70">Email</span>
-            <input value={email} onChange={e => setEmail(e.target.value)} type="email" autoComplete="email" placeholder="you@example.com" required
+            <span className="mb-1 block text-[12px] font-medium text-white/70">
+              {mode === 'register' || mode === 'reset' ? 'Email' : 'Username or email'}
+            </span>
+            <input value={login} onChange={e => setLogin(e.target.value)} type={mode === 'signin' ? 'text' : 'email'}
+              autoComplete={mode === 'register' || mode === 'reset' ? 'email' : 'username'}
+              placeholder={mode === 'signin' ? 'x0bi3 or you@example.com' : 'you@example.com'} required
               className="w-full rounded-xl bg-white/10 px-3.5 py-2.5 text-[14px] text-white placeholder-white/40 ring-1 ring-white/15 outline-none transition focus:bg-white/15 focus:ring-white/40" />
           </label>
           {mode !== 'reset' && (
