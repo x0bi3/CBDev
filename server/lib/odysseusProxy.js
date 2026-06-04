@@ -16,6 +16,20 @@ const REWRITE_TYPES = new Set([
 function rewritePaths(text) {
   const P = CHAT_PREFIX;
 
+  // Odysseus builds API URLs from window.location.origin (misses /chat prefix)
+  text = text.replace(
+    /const (API(?:_BASE)?) = window\.location\.origin;/g,
+    `const $1 = window.location.origin + '${P}';`,
+  );
+  text = text.replace(
+    /\$\{window\.location\.origin\}\/api\//g,
+    `\${window.location.origin}${P}/api/`,
+  );
+  text = text.replace(
+    /window\.location\.origin \+ (['"])\/api\//g,
+    `window.location.origin + $1${P}/api/`,
+  );
+
   // Template literals: `/api/...`, `/static/...`
   text = text.replace(/`\/(api|static)\//g, (_, root) => '`' + P + '/' + root + '/');
 
