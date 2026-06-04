@@ -52,6 +52,11 @@ export default defineConfig({
         manualChunks: (id) => {
           if (id.includes('framer-motion')) return 'framer-motion-v2';
           if (id.includes('node_modules/react')) return 'react-vendor-v2';
+          // Keep context + API out of the main entry so lazy app chunks can import
+          // them without creating a circular main ↔ chunk dependency.
+          if (id.includes('context/DeviceContext') || id.includes('lib/standaloneApi')) {
+            return 'shared-core';
+          }
         },
         chunkFileNames: 'assets/[name]-[hash].js',
         entryFileNames: 'assets/[name]-[hash].js',
