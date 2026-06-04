@@ -18,7 +18,7 @@ export const HOME_APPS_VISIBILITY = `
 export const STORE_CATALOG_WHERE = `
   h.active = TRUE
   AND h.store_visible = TRUE
-  AND h.app_id != 'app-store'
+  AND h.app_id NOT IN ('app-store', 'calendar')
   AND (
     (h.requires_auth AND NOT h.assign_users)
     OR (
@@ -36,6 +36,18 @@ const APP_SELECT = `
   requires_auth, assign_users, launch_type, launch_url, auto_install
 `;
 
+/** Home apps list — pass user id as $1 for user_installed flag. */
+export const HOME_APP_SELECT = `
+  ${APP_SELECT},
+  (
+    $1::int IS NOT NULL
+    AND EXISTS (
+      SELECT 1 FROM user_home_apps u
+      WHERE u.home_app_id = home_apps.id AND u.user_id = $1::int
+    )
+  ) AS user_installed
+`;
+
 export { APP_SELECT };
 
 export function mapHomeAppRow(row) {
@@ -50,6 +62,7 @@ export function mapHomeAppRow(row) {
     launchType: row.launch_type || 'embedded',
     launchUrl: row.launch_url || null,
     autoInstall: !!row.auto_install,
+    userInstalled: !!row.user_installed,
   };
 }
 

@@ -4,9 +4,16 @@ import { api, invalidateApiCache } from '../../lib/standaloneApi.js';
 import { AppShell, Card } from '../appUi.jsx';
 
 function launchLabel(type) {
-  if (type === 'route') return 'Opens in browser';
+  if (type === 'route') return 'Opens full screen';
   if (type === 'external') return 'External link';
   return 'In-app';
+}
+
+function actionLabel(app, busy) {
+  if (busy) return '…';
+  if (app.autoInstall) return 'Included';
+  if (app.installed) return 'Remove';
+  return 'Get';
 }
 
 export default function AppStoreApp() {
@@ -21,7 +28,7 @@ export default function AppStoreApp() {
     setErr(null);
     return api('/store/apps')
       .then((r) => setApps(r.apps || []))
-      .catch((e) => setErr(e.message || 'Failed to load store'))
+      .catch((e) => setErr(e.message || 'Failed to load services'))
       .finally(() => setLoading(false));
   };
 
@@ -31,6 +38,7 @@ export default function AppStoreApp() {
   }, [auth]);
 
   const toggleInstall = async (app) => {
+    if (app.autoInstall) return;
     setBusyId(app.id);
     setErr(null);
     try {
@@ -51,10 +59,10 @@ export default function AppStoreApp() {
 
   if (!auth) {
     return (
-      <AppShell title="App Store" subtitle="Install apps on your home screen.">
+      <AppShell title="Service Center" subtitle="Add services to your home screen.">
         <Card>
           <p className="text-[14px] leading-relaxed text-white/80">
-            Sign in to browse apps available for your account and add them to your home screen.
+            Sign in to browse services available for your account and add them to your home screen.
           </p>
           <button type="button" onClick={openAuth}
             className="mt-4 w-full rounded-2xl bg-white py-3 text-[14px] font-semibold text-black active:scale-[0.98]">
@@ -66,13 +74,13 @@ export default function AppStoreApp() {
   }
 
   return (
-    <AppShell title="App Store" subtitle="Get apps for your home screen.">
+    <AppShell title="Service Center" subtitle="Add services to your home screen.">
       {loading && apps.length === 0 && (
         <Card><p className="text-[14px] text-white/60">Loading…</p></Card>
       )}
       {!loading && apps.length === 0 && !err && (
         <Card>
-          <p className="text-[14px] text-white/70">No apps available right now. Check back later or ask your admin for access.</p>
+          <p className="text-[14px] text-white/70">No services available right now. Check back later or ask your admin for access.</p>
         </Card>
       )}
       {apps.map((app) => (
@@ -87,10 +95,10 @@ export default function AppStoreApp() {
             <button type="button" disabled={busyId === app.id || app.autoInstall}
               onClick={() => toggleInstall(app)}
               className={'shrink-0 rounded-full px-4 py-2 text-[13px] font-semibold transition active:scale-95 ' +
-                (app.installed
-                  ? 'bg-white/10 text-white ring-1 ring-white/20 hover:bg-white/15'
+                (app.installed || app.autoInstall
+                  ? 'bg-white/10 text-white ring-1 ring-white/20 hover:bg-white/15 disabled:opacity-70'
                   : 'bg-white text-black hover:bg-white/90')}>
-              {busyId === app.id ? '…' : app.installed ? 'Remove' : 'Get'}
+              {actionLabel(app, busyId === app.id)}
             </button>
           </div>
         </Card>

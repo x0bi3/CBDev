@@ -28,6 +28,37 @@
     box-shadow: inset 0 1px 0 rgba(255,255,255,0.32), 0 28px 72px rgba(0,0,0,0.5);
   }
   .icon-shadow { box-shadow: 0 6px 12px rgba(0,0,0,.35); }
+
+  /* User-installed home icons — theme-orb gradient ring */
+  .icon-user-installed {
+    border-radius: 9999px;
+    background: linear-gradient(135deg,
+      var(--shim-1, #6ea8ff) 0%,
+      var(--shim-2, #c084fc) 50%,
+      var(--shim-3, #ff7ab6) 100%);
+    box-shadow:
+      0 0 12px color-mix(in srgb, var(--shim-1, #6ea8ff) 45%, transparent),
+      0 0 20px color-mix(in srgb, var(--shim-2, #c084fc) 30%, transparent);
+    animation: icon-glow-shift 6s ease-in-out infinite;
+  }
+  @keyframes icon-glow-shift {
+    0%, 100% {
+      filter: hue-rotate(0deg) brightness(1);
+      box-shadow:
+        0 0 12px color-mix(in srgb, var(--shim-1, #6ea8ff) 45%, transparent),
+        0 0 20px color-mix(in srgb, var(--shim-2, #c084fc) 30%, transparent);
+    }
+    50% {
+      filter: hue-rotate(18deg) brightness(1.08);
+      box-shadow:
+        0 0 14px color-mix(in srgb, var(--shim-2, #c084fc) 50%, transparent),
+        0 0 24px color-mix(in srgb, var(--shim-3, #ff7ab6) 35%, transparent);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .icon-user-installed { animation: none; }
+  }
+
   .no-scrollbar::-webkit-scrollbar { display:none; }
   .no-scrollbar { scrollbar-width:none; }
 

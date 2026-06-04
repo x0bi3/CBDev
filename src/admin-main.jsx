@@ -547,7 +547,7 @@ function HomeAppsSection() {
       </div>
       <p className="mb-4 text-sm text-slate-400">
         Public apps show for everyone on the home screen. Auto-install apps appear for all signed-in users.
-        Store-eligible apps can be assigned to users — they install from the App Store, not automatically on home.
+        Store-eligible apps can be assigned to users — they install from the Service Center, not automatically on home.
       </p>
       <Table
         columns={[
@@ -588,7 +588,7 @@ function HomeAppsSection() {
               </Field>
               <label className="flex items-center gap-2 text-sm text-slate-300">
                 <input type="checkbox" checked={edit.store_visible !== false} onChange={e => setEdit({ ...edit, store_visible: e.target.checked })} />
-                Visible in App Store catalog
+                Visible in Service Center catalog
               </label>
               <label className="flex items-center gap-2 text-sm text-slate-300">
                 <input type="checkbox" checked={!!edit.auto_install} disabled={!!edit.assign_users}
@@ -614,7 +614,7 @@ function HomeAppsSection() {
               </label>
               {edit.assign_users && (
                 <div className="rounded-lg border border-slate-600 bg-slate-800/50 p-3">
-                  <p className="text-xs font-medium text-slate-400">Eligible users (can install from App Store)</p>
+                  <p className="text-xs font-medium text-slate-400">Eligible users (can install from Service Center)</p>
                   <div className="mt-2 max-h-40 space-y-1 overflow-y-auto">
                     {allUsers.length === 0 && <p className="text-sm text-slate-500">No users yet — register accounts on the main site first.</p>}
                     {allUsers.map(u => (

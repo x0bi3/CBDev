@@ -11,9 +11,12 @@ router.get('/apps', requireAuth, async (req, res) => {
     const { rows } = await query(
       `SELECT h.app_id, h.label, h.glyph, h.tile, h.screen, h.portfolio_slug, h.sort_order,
               h.requires_auth, h.assign_users, h.launch_type, h.launch_url, h.auto_install,
-              EXISTS (
-                SELECT 1 FROM user_home_apps u
-                WHERE u.home_app_id = h.id AND u.user_id = $1::int
+              (
+                EXISTS (
+                  SELECT 1 FROM user_home_apps u
+                  WHERE u.home_app_id = h.id AND u.user_id = $1::int
+                )
+                OR h.auto_install = TRUE
               ) AS installed
        FROM home_apps h
        WHERE ${STORE_CATALOG_WHERE}

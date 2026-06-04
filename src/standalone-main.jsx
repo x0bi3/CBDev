@@ -414,6 +414,7 @@ function mapHomeAppFromApi(a) {
     launchType: a.launchType || 'embedded',
     launchUrl: a.launchUrl || null,
     autoInstall: !!a.autoInstall,
+    userInstalled: !!a.userInstalled,
     homePage: a.id === 'legal' ? 2 : undefined,
   };
 }
@@ -2338,8 +2339,15 @@ function AppFolderOverlay() {
 }
 
 function AppIcon({ app, onTap, showLabel = true, size = APP_TILE_SIZE }) {
-  const { shellAppId } = useDevice();
+  const { shellAppId, themeId } = useDevice();
   const hideTile = shellAppId === app.id;
+  const userInstalled = !!app.userInstalled;
+  const orbs = (themes[themeId] && themes[themeId].orbs) || ['#c4b5fd', '#67e8f9', '#c4b5fd'];
+  const glowStyle = userInstalled ? {
+    '--shim-1': orbs[0],
+    '--shim-2': orbs[1] || orbs[0],
+    '--shim-3': orbs[2] || orbs[1] || orbs[0],
+  } : undefined;
   const handle = () => {
     if (app.launchType === 'route' && app.launchUrl) {
       window.location.href = app.launchUrl;
@@ -2355,7 +2363,11 @@ function AppIcon({ app, onTap, showLabel = true, size = APP_TILE_SIZE }) {
   return (
     <button onClick={handle} aria-label={'Open ' + app.label}
       className="group flex flex-col items-center gap-1.5 outline-none focus-visible:ring-2 focus-visible:ring-white/70 rounded-2xl">
-      {/* Rounded clip + shadow stay off the layoutId node (square morph target). */}
+      <div className={'relative' + (userInstalled ? ' icon-user-installed p-[2px]' : '')}
+        style={{
+          ...glowStyle,
+          ...(userInstalled ? { borderRadius: APP_TILE_RADIUS_PX + 3 } : {}),
+        }}>
       <div className="icon-shadow relative overflow-hidden"
         style={{ width:size, height:size, borderRadius:APP_TILE_RADIUS_PX }}>
         <motion.div layoutId={'app-tile-' + app.id} className="absolute inset-0"
@@ -2365,6 +2377,7 @@ function AppIcon({ app, onTap, showLabel = true, size = APP_TILE_SIZE }) {
             style={{ background:'linear-gradient(180deg,rgba(255,255,255,0.28) 0%,rgba(255,255,255,0) 35%,rgba(0,0,0,0.18) 100%)' }} />
           <div className="absolute inset-0 grid place-items-center text-[28px] leading-none text-white">{app.glyph}</div>
         </motion.div>
+      </div>
       </div>
       {showLabel && <span
         className="text-[13px] font-semibold leading-tight text-white drop-shadow-[0_1px_3px_rgba(0,0,0,0.7)]">{app.label}</span>}
