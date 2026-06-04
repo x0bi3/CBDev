@@ -120,6 +120,7 @@ function DeviceProvider({ children }) {
   const authRef = useRef(null);
   authRef.current = auth;
   const [authOpen, setAuthOpen] = useState(false);
+  const [installCelebrateId, setInstallCelebrateId] = useState(null);
   const [screenApps, setScreenApps] = useState({ home: homeApps, dock: dockApps });
   const screenAppsRef = useRef(screenApps);
   screenAppsRef.current = screenApps;
@@ -194,6 +195,11 @@ function DeviceProvider({ children }) {
         setAuthState(null);
       }
     })();
+  }, []);
+
+  const celebrateInstall = useCallback((appId) => {
+    setInstallCelebrateId(appId);
+    window.setTimeout(() => setInstallCelebrateId(null), 2600);
   }, []);
 
   const openFolder = useCallback((id) => setOpenFolderId(id), []);
@@ -300,6 +306,7 @@ function DeviceProvider({ children }) {
     ccOpen, toggleCc, closeCc,
     appOrder, setAppOrder, resetAppOrder,
     auth, setAuth, authOpen, openAuth, closeAuth, screenApps, refreshHomeApps: loadScreenApps,
+    celebrateInstall, installCelebrateId,
     findApp: (id) => findApp(id, screenApps),
     profileBtnRef, themeBtnRef, musicBtnRef,
     // music
@@ -309,9 +316,9 @@ function DeviceProvider({ children }) {
     miniPlayerOpen, openMiniPlayer, closeMiniPlayer,
     // gesture lock
     dragLocked, lockDrag, unlockDrag,
-  }), [themeId, eyeId, homePage, openFolderId, openAppId, prevAppId, shellAppId, ccOpen, appOrder, auth, authOpen, screenApps, loadScreenApps,
+  }), [themeId, eyeId, homePage, openFolderId, openAppId, prevAppId, shellAppId, ccOpen, appOrder, auth, authOpen, screenApps, loadScreenApps, installCelebrateId,
       musicCurrent, musicPlaying, musicVolume, musicStatus, miniPlayerOpen, dragLocked,
-      openFolder, closeFolder, openApp, closeApp, handleShellExitComplete, setAppOrder, resetAppOrder, setAuth, openAuth, closeAuth,
+      openFolder, closeFolder, openApp, closeApp, handleShellExitComplete, setAppOrder, resetAppOrder, setAuth, openAuth, closeAuth, celebrateInstall,
       toggleCc, closeCc, playStation, togglePlay, setMusicVolume, openMiniPlayer, closeMiniPlayer,
       lockDrag, unlockDrag]);
   return <DeviceCtx.Provider value={value}>{children}</DeviceCtx.Provider>;
@@ -340,10 +347,6 @@ const projectsFolderMeta = {
   kind: 'folder',
   appIds: PROJECT_APP_IDS,
 };
-const calendarApp = {
-  id:'calendar', label:'Calendar', tile:'linear-gradient(135deg,#34d399,#0f766e)', glyph:'📅', requiresAuth: true,
-};
-
 function resolveHomeApps(appOrder, baseHome = homeApps) {
   const byId = Object.fromEntries(baseHome.map(a => [a.id, a]));
   const baseIds = appOrder && Array.isArray(appOrder) ? appOrder : baseHome.map(a => a.id);
@@ -424,7 +427,7 @@ const dockApps = [
   supportApp,
   { id:'contact',   label:'Contact',   tile:'linear-gradient(135deg,#ec4899,#831843)', glyph:'✉️' },
 ];
-const allApps = [...homeApps, calendarApp, supportApp, ...dockApps];
+const allApps = [...homeApps, supportApp, ...dockApps];
 const getApp = id => allApps.find(a => a.id === id);
 
 function findApp(id, screenApps) {
@@ -2339,8 +2342,9 @@ function AppFolderOverlay() {
 }
 
 function AppIcon({ app, onTap, showLabel = true, size = APP_TILE_SIZE }) {
-  const { shellAppId, themeId } = useDevice();
+  const { shellAppId, themeId, installCelebrateId } = useDevice();
   const hideTile = shellAppId === app.id;
+  const celebrating = installCelebrateId === app.id;
   const userInstalled = !!app.userInstalled;
   const orbs = (themes[themeId] && themes[themeId].orbs) || ['#c4b5fd', '#67e8f9', '#c4b5fd'];
   const glowStyle = userInstalled ? {
@@ -2361,6 +2365,13 @@ function AppIcon({ app, onTap, showLabel = true, size = APP_TILE_SIZE }) {
     else onTap(app);
   };
   return (
+    <motion.div
+      className={celebrating ? 'icon-install-celebrate' : undefined}
+      initial={celebrating ? { scale: 0, opacity: 0, y: 28 } : false}
+      animate={{ scale: 1, opacity: 1, y: 0 }}
+      transition={celebrating
+        ? { type: 'spring', stiffness: 440, damping: 22, delay: 0.1 }
+        : { duration: 0 }}>
     <button onClick={handle} aria-label={'Open ' + app.label}
       className="group flex flex-col items-center gap-1.5 outline-none focus-visible:ring-2 focus-visible:ring-white/70 rounded-2xl">
       <div className={'relative' + (userInstalled ? ' icon-user-installed p-[2px]' : '')}
@@ -2382,6 +2393,7 @@ function AppIcon({ app, onTap, showLabel = true, size = APP_TILE_SIZE }) {
       {showLabel && <span
         className="text-[13px] font-semibold leading-tight text-white drop-shadow-[0_1px_3px_rgba(0,0,0,0.7)]">{app.label}</span>}
     </button>
+    </motion.div>
   );
 }
 
@@ -2406,7 +2418,7 @@ function buildHomePages(orderedApps) {
 }
 
 function HomeGrid() {
-  const { openApp, openFolder, setHomePage, appOrder, auth, screenApps } = useDevice();
+  const { openApp, openFolder, setHomePage, appOrder, auth, screenApps, installCelebrateId } = useDevice();
   const scrollerRef = React.useRef(null);
 
   const orderedApps = React.useMemo(
@@ -2415,6 +2427,15 @@ function HomeGrid() {
   );
 
   const pages = React.useMemo(() => buildHomePages(orderedApps), [orderedApps]);
+
+  React.useEffect(() => {
+    if (!installCelebrateId || !scrollerRef.current) return;
+    const idx = pages.findIndex((page) => page.some((a) => a.id === installCelebrateId));
+    if (idx < 0) return;
+    setHomePage(idx);
+    const el = scrollerRef.current;
+    el.scrollTo({ left: idx * el.clientWidth, behavior: 'smooth' });
+  }, [installCelebrateId, pages, setHomePage]);
 
   const onScroll = React.useCallback(() => {
     const el = scrollerRef.current;

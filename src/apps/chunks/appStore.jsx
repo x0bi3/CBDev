@@ -17,7 +17,7 @@ function actionLabel(app, busy) {
 }
 
 export default function AppStoreApp() {
-  const { auth, openAuth, refreshHomeApps } = useDevice();
+  const { auth, openAuth, refreshHomeApps, celebrateInstall, closeApp } = useDevice();
   const [apps, setApps] = useState([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState(null);
@@ -44,12 +44,16 @@ export default function AppStoreApp() {
     try {
       if (app.installed) {
         await api(`/store/apps/${encodeURIComponent(app.id)}/uninstall`, { method: 'DELETE' });
+        invalidateApiCache('user:');
+        await refreshHomeApps();
+        await loadStore();
       } else {
         await api(`/store/apps/${encodeURIComponent(app.id)}/install`, { method: 'POST' });
+        invalidateApiCache('user:');
+        await refreshHomeApps();
+        closeApp();
+        window.setTimeout(() => celebrateInstall(app.id), 360);
       }
-      invalidateApiCache('user:');
-      await refreshHomeApps();
-      await loadStore();
     } catch (e) {
       setErr(e.message || 'Action failed');
     } finally {
