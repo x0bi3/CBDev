@@ -3,83 +3,52 @@ import { findUserByUsername, signToken } from '../auth.js';
 import { formatCbdevTokenCookie } from './odysseusAuth.js';
 
 const CHAT_PREFIX = '/chat';
+const STATIC_ALIAS = 'st';
+const STATIC_PREFIX = `${CHAT_PREFIX}/${STATIC_ALIAS}`;
 const TARGET = process.env.ODYSSEUS_URL || 'http://127.0.0.1:7000';
 
-const REWRITE_TYPES = new Set([
-  'text/html',
-  'text/css',
-  'application/javascript',
-  'text/javascript',
-  'application/json',
-]);
+const BRIDGE_TAG = `<script src="${CHAT_PREFIX}/ody-bridge.js"></script>`;
 
-function rewritePaths(text) {
+function rewriteHtml(html) {
   const P = CHAT_PREFIX;
 
-  // Odysseus builds API URLs from window.location.origin (misses /chat prefix)
-  text = text.replace(
-    /const (API(?:_BASE)?) = window\.location\.origin;/g,
-    `const $1 = window.location.origin + '${P}';`,
-  );
-  text = text.replace(
-    /\$\{window\.location\.origin\}\/api\//g,
-    `\${window.location.origin}${P}/api/`,
-  );
-  text = text.replace(
-    /window\.location\.origin \+ (['"])\/api\//g,
-    `window.location.origin + $1${P}/api/`,
-  );
+  if (!html.includes('/ody-bridge.js')) {
+    html = html.replace(/<head([^>]*)>/i, `<head$1>${BRIDGE_TAG}`);
+  }
 
-  // Template literals: `/api/...`, `/static/...`
-  text = text.replace(/`\/(api|static)\//g, (_, root) => '`' + P + '/' + root + '/');
-
-  // Quoted app paths — only /api and /static (never blanket quote+slash)
-  text = text.replace(/(['"])\/(api|static)(?=\/|['"])/g, `$1${P}/$2`);
-
-  // SPA deep-link routes
-  text = text.replace(
-    /(['"])\/(notes|calendar|cookbook|email|memory|gallery|tasks|library|login|backgrounds)(?=['"/?#]|$)/g,
-    `$1${P}/$2`,
-  );
-
-  // HTML attributes
-  text = text
-    .replace(/(\s(?:href|src|action)\s*=\s*["'])\/(?!chat\/)(api|static)\//gi, `$1${P}/$2/`)
+  return html
+    .replace(/(\s(?:href|src|action)\s*=\s*["'])\/(?!chat\/)(api)\//gi, `$1${P}/$2/`)
+    .replace(/(\s(?:href|src|action)\s*=\s*["'])\/(?!chat\/)(static)\//gi, `$1${STATIC_PREFIX}/`)
+    .replace(/(\s(?:href|src|action)\s*=\s*["'])\/chat\/(?:static|s)\//gi, `$1${STATIC_PREFIX}/`)
     .replace(
       /(\s(?:href|src|action)\s*=\s*["'])\/(?!chat\/)(?:notes|calendar|cookbook|email|memory|gallery|tasks|library|login|backgrounds)\b/gi,
       `$1${P}/$2`,
+    )
+    .replace(
+      /window\.location\.(replace|assign)\s*\(\s*['"]\/?['"]\s*\)/gi,
+      `window.location.$1('${P}/')`,
     );
+}
 
-  // fetch/import/EventSource/WebSocket calls
-  text = text
-    .replace(/(\bfetch\s*\(\s*['"])\/(?!chat\/)/g, `$1${P}/`)
-    .replace(/(\bimport\s*\(\s*['"])\/(?!chat\/)/g, `$1${P}/`)
-    .replace(/(\bnew\s+EventSource\s*\(\s*['"])\/(?!chat\/)/g, `$1${P}/`)
-    .replace(/(\bnew\s+WebSocket\s*\(\s*['"])\/(?!chat\/)/g, `$1${P}/`);
-
-  // CSS url(/static/...)
-  text = text.replace(/url\(\s*(["']?)\/(?!chat\/)(api|static)\//g, `url($1${P}/$2/`);
-
-  // Attribute fallbacks for paths without api/static prefix
-  text = text
-    .replace(/="\/(?!chat\/)(api|static)\//g, `="${P}/$1/`)
-    .replace(/='\/(?!chat\/)(api|static)\//g, `='${P}/$1/`);
-
-  text = text.replace(
-    /window\.location\.(replace|assign)\s*\(\s*['"]\/?['"]\s*\)/gi,
-    `window.location.$1('${P}/')`,
-  );
-
-  return text;
+function rewriteCss(css) {
+  const P = CHAT_PREFIX;
+  return css
+    .replace(/url\(\s*(["']?)\/(?!chat\/)(static)\//g, `url($1${STATIC_PREFIX}/`)
+    .replace(/url\(\s*(["']?)\/chat\/(?:static|s)\//g, `url($1${STATIC_PREFIX}/`);
 }
 
 function rewriteBody(body, contentType) {
   if (!body?.length || !contentType) return body;
   const baseType = contentType.split(';')[0].trim().toLowerCase();
-  if (!REWRITE_TYPES.has(baseType)) return body;
 
-  const text = rewritePaths(body.toString('utf8'));
-  return Buffer.from(text, 'utf8');
+  const text = body.toString('utf8');
+  let rewritten = text;
+  if (baseType === 'text/html') rewritten = rewriteHtml(text);
+  else if (baseType === 'text/css') rewritten = rewriteCss(text);
+  else return body;
+
+  if (rewritten === text) return body;
+  return Buffer.from(rewritten, 'utf8');
 }
 
 function normalizeSetCookies(value) {
@@ -162,7 +131,6 @@ export function createOdysseusProxy() {
           }
 
           const extraCookies = [];
-          // Odysseus login at /chat → also issue CreativeBuilds session cookie
           if (
             req.method === 'POST'
             && upstreamPath.startsWith('/api/auth/login')
@@ -202,4 +170,4 @@ export function createOdysseusProxy() {
   };
 }
 
-export { CHAT_PREFIX };
+export { CHAT_PREFIX, STATIC_PREFIX };

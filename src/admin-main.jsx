@@ -509,6 +509,7 @@ function HomeAppsSection() {
     const base = row || {
       app_id: '', label: '', glyph: '📱', tile: 'linear-gradient(135deg,#6366f1,#8b5cf6)',
       screen: 'home', active: true, requires_auth: false, assign_users: false, user_ids: [],
+      launch_type: 'embedded', launch_url: '', store_visible: true, auto_install: false,
     };
     if (row?.id) {
       const a = await api('/admin/home-apps/' + row.id + '/assignments');
@@ -533,8 +534,9 @@ function HomeAppsSection() {
     setEdit(null); load();
   };
   const accessLabel = (r) => {
-    if (r.assign_users) return `assigned (${r.assignee_count || 0})`;
-    if (r.requires_auth) return 'signed-in';
+    if (r.auto_install) return 'auto-install';
+    if (r.assign_users) return `store eligible (${r.assignee_count || 0})`;
+    if (r.requires_auth) return 'signed-in store';
     return 'public';
   };
   return (
@@ -544,14 +546,15 @@ function HomeAppsSection() {
         <Btn onClick={() => openEdit(null)}>Add app</Btn>
       </div>
       <p className="mb-4 text-sm text-slate-400">
-        Public apps show for everyone. &quot;Signed-in&quot; apps appear for any logged-in user.
-        &quot;Assigned&quot; apps only appear for selected users (inventory, chatbot, etc.).
+        Public apps show for everyone on the home screen. Auto-install apps appear for all signed-in users.
+        Store-eligible apps can be assigned to users — they install from the App Store, not automatically on home.
       </p>
       <Table
         columns={[
           { key: 'app_id', label: 'ID' },
           { key: 'label', label: 'Label' },
           { key: 'screen', label: 'Screen' },
+          { key: 'launch_type', label: 'Launch' },
           { key: 'access', label: 'Access', render: accessLabel },
           { key: 'active', label: 'Active', render: r => r.active ? 'yes' : 'no' },
           { key: 'portfolio_slug', label: 'Portfolio slug' },
@@ -572,12 +575,32 @@ function HomeAppsSection() {
               <Field label="Screen"><select className={inputCls()} value={edit.screen || 'home'} onChange={e => setEdit({ ...edit, screen: e.target.value })}><option value="home">home</option><option value="dock">dock</option></select></Field>
               <Field label="Portfolio slug (project tiles)"><input className={inputCls()} value={edit.portfolio_slug || ''} onChange={e => setEdit({ ...edit, portfolio_slug: e.target.value || null })} placeholder="optional" /></Field>
               <Field label="Sort order"><input type="number" className={inputCls()} value={edit.sort_order || 0} onChange={e => setEdit({ ...edit, sort_order: Number(e.target.value) })} /></Field>
+              <Field label="Launch type">
+                <select className={inputCls()} value={edit.launch_type || 'embedded'} onChange={e => setEdit({ ...edit, launch_type: e.target.value })}>
+                  <option value="embedded">embedded (in phone shell)</option>
+                  <option value="route">route (full-page, e.g. /chat)</option>
+                  <option value="external">external (new tab)</option>
+                </select>
+              </Field>
+              <Field label="Launch URL">
+                <input className={inputCls()} value={edit.launch_url || ''} onChange={e => setEdit({ ...edit, launch_url: e.target.value || null })}
+                  placeholder="/chat or https://…" />
+              </Field>
+              <label className="flex items-center gap-2 text-sm text-slate-300">
+                <input type="checkbox" checked={edit.store_visible !== false} onChange={e => setEdit({ ...edit, store_visible: e.target.checked })} />
+                Visible in App Store catalog
+              </label>
+              <label className="flex items-center gap-2 text-sm text-slate-300">
+                <input type="checkbox" checked={!!edit.auto_install} disabled={!!edit.assign_users}
+                  onChange={e => setEdit({ ...edit, auto_install: e.target.checked })} />
+                Auto-install on home for signed-in users
+              </label>
               <label className="flex items-center gap-2 text-sm text-slate-300">
                 <input type="checkbox" checked={edit.active !== false} onChange={e => setEdit({ ...edit, active: e.target.checked })} />
                 Active (visible when access rules match)
               </label>
               <label className="flex items-center gap-2 text-sm text-slate-300">
-                <input type="checkbox" checked={!!edit.requires_auth} disabled={!!edit.assign_users} onChange={e => setEdit({ ...edit, requires_auth: e.target.checked })} />
+                <input type="checkbox" checked={!!edit.requires_auth} disabled={!!edit.assign_users || !!edit.auto_install} onChange={e => setEdit({ ...edit, requires_auth: e.target.checked })} />
                 Require sign-in (any logged-in user)
               </label>
               <label className="flex items-center gap-2 text-sm text-slate-300">
@@ -585,12 +608,13 @@ function HomeAppsSection() {
                   ...edit,
                   assign_users: e.target.checked,
                   requires_auth: e.target.checked ? true : edit.requires_auth,
+                  auto_install: e.target.checked ? false : edit.auto_install,
                 })} />
-                Assign to specific users only
+                Store eligibility — assign specific users
               </label>
               {edit.assign_users && (
                 <div className="rounded-lg border border-slate-600 bg-slate-800/50 p-3">
-                  <p className="text-xs font-medium text-slate-400">Assigned users</p>
+                  <p className="text-xs font-medium text-slate-400">Eligible users (can install from App Store)</p>
                   <div className="mt-2 max-h-40 space-y-1 overflow-y-auto">
                     {allUsers.length === 0 && <p className="text-sm text-slate-500">No users yet — register accounts on the main site first.</p>}
                     {allUsers.map(u => (

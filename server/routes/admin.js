@@ -314,13 +314,13 @@ router.get('/users', async (_req, res) => {
 });
 
 /* ---------- Home apps ---------- */
-async function syncHomeAppAssignments(homeAppId, userIds) {
-  await query('DELETE FROM user_home_apps WHERE home_app_id = $1', [homeAppId]);
+async function syncHomeAppEligibility(homeAppId, userIds) {
+  await query('DELETE FROM user_app_eligibility WHERE home_app_id = $1', [homeAppId]);
   if (!userIds?.length) return;
   const ids = [...new Set(userIds.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))];
   for (const uid of ids) {
     await query(
-      'INSERT INTO user_home_apps (user_id, home_app_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+      'INSERT INTO user_app_eligibility (user_id, home_app_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
       [uid, homeAppId],
     );
   }
@@ -329,7 +329,7 @@ async function syncHomeAppAssignments(homeAppId, userIds) {
 router.get('/home-apps', async (_req, res) => {
   const { rows } = await query(
     `SELECT h.*,
-      (SELECT count(*)::int FROM user_home_apps u WHERE u.home_app_id = h.id) AS assignee_count
+      (SELECT count(*)::int FROM user_app_eligibility e WHERE e.home_app_id = h.id) AS assignee_count
      FROM home_apps h
      ORDER BY h.screen, h.sort_order, h.id`,
   );
@@ -339,9 +339,9 @@ router.get('/home-apps', async (_req, res) => {
 router.get('/home-apps/:id/assignments', async (req, res) => {
   const { rows } = await query(
     `SELECT u.id, u.email, u.name, u.role
-     FROM user_home_apps uha
-     JOIN users u ON u.id = uha.user_id
-     WHERE uha.home_app_id = $1
+     FROM user_app_eligibility e
+     JOIN users u ON u.id = e.user_id
+     WHERE e.home_app_id = $1
      ORDER BY u.email`,
     [req.params.id],
   );
@@ -352,12 +352,19 @@ router.post('/home-apps', async (req, res) => {
   const b = req.body;
   const assignUsers = !!b.assign_users;
   const { rows } = await query(
-    `INSERT INTO home_apps (app_id, label, glyph, tile, screen, portfolio_slug, sort_order, requires_auth, assign_users, active)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
-    [b.app_id, b.label, b.glyph || '📱', b.tile, b.screen || 'home', b.portfolio_slug || null, b.sort_order ?? 0,
-      !!b.requires_auth || assignUsers, assignUsers, b.active !== false],
+    `INSERT INTO home_apps (
+       app_id, label, glyph, tile, screen, portfolio_slug, sort_order,
+       requires_auth, assign_users, active, launch_type, launch_url, store_visible, auto_install
+     )
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
+    [
+      b.app_id, b.label, b.glyph || '📱', b.tile, b.screen || 'home', b.portfolio_slug || null,
+      b.sort_order ?? 0, !!b.requires_auth || assignUsers, assignUsers, b.active !== false,
+      b.launch_type || 'embedded', b.launch_url || null,
+      b.store_visible !== false, !!b.auto_install,
+    ],
   );
-  if (assignUsers && b.user_ids) await syncHomeAppAssignments(rows[0].id, b.user_ids);
+  if (assignUsers && b.user_ids) await syncHomeAppEligibility(rows[0].id, b.user_ids);
   res.status(201).json({ app: rows[0] });
 });
 
@@ -365,14 +372,20 @@ router.put('/home-apps/:id', async (req, res) => {
   const b = req.body;
   const assignUsers = !!b.assign_users;
   const { rows } = await query(
-    `UPDATE home_apps SET app_id=$1, label=$2, glyph=$3, tile=$4, screen=$5, portfolio_slug=$6, sort_order=$7,
-      requires_auth=$8, assign_users=$9, active=$10
-     WHERE id=$11 RETURNING *`,
-    [b.app_id, b.label, b.glyph, b.tile, b.screen, b.portfolio_slug || null, b.sort_order ?? 0,
-      !!b.requires_auth || assignUsers, assignUsers, b.active !== false, req.params.id],
+    `UPDATE home_apps SET
+       app_id=$1, label=$2, glyph=$3, tile=$4, screen=$5, portfolio_slug=$6, sort_order=$7,
+       requires_auth=$8, assign_users=$9, active=$10, launch_type=$11, launch_url=$12,
+       store_visible=$13, auto_install=$14
+     WHERE id=$15 RETURNING *`,
+    [
+      b.app_id, b.label, b.glyph, b.tile, b.screen, b.portfolio_slug || null, b.sort_order ?? 0,
+      !!b.requires_auth || assignUsers, assignUsers, b.active !== false,
+      b.launch_type || 'embedded', b.launch_url || null,
+      b.store_visible !== false, !!b.auto_install, req.params.id,
+    ],
   );
   if (!rows[0]) { res.status(404).json({ error: 'Not found' }); return; }
-  if (b.user_ids !== undefined) await syncHomeAppAssignments(rows[0].id, b.user_ids);
+  if (b.user_ids !== undefined) await syncHomeAppEligibility(rows[0].id, b.user_ids);
   res.json({ app: rows[0] });
 });
 

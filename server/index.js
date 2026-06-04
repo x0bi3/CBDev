@@ -10,12 +10,14 @@ import blogRoutes from './routes/blog.js';
 import ticketsRoutes from './routes/tickets.js';
 import calendarRoutes from './routes/calendar.js';
 import homeRoutes from './routes/home.js';
+import storeRoutes from './routes/store.js';
 import adminRoutes from './routes/admin.js';
 import { pool } from './db.js';
 import { ensureUploadDirs } from './lib/uploads.js';
 import { startBlogIdeasScheduler } from './lib/blogIdeasScheduler.js';
 import { migrateBlogBodyToHtml } from './lib/blogMigrate.js';
-import { createOdysseusProxy, CHAT_PREFIX } from './lib/odysseusProxy.js';
+import { createOdysseusProxy, CHAT_PREFIX, STATIC_PREFIX } from './lib/odysseusProxy.js';
+import { createOdysseusStaticRoute } from './lib/odysseusStatic.js';
 import { ensureOdysseusSession } from './lib/odysseusAuth.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -58,7 +60,14 @@ function isAdminHost(req) {
   return ADMIN_HOSTS.has(host);
 }
 
-app.use(express.json({ limit: '2mb' }));
+const jsonParser = express.json({ limit: '2mb' });
+app.use((req, res, next) => {
+  // Odysseus proxy must stream POST bodies; global json() consumes them first.
+  if (req.path === CHAT_PREFIX || req.path.startsWith(`${CHAT_PREFIX}/`)) {
+    return next();
+  }
+  jsonParser(req, res, next);
+});
 app.use('/uploads', express.static(uploadsDir, { maxAge: '7d' }));
 
 app.get('/api/health', async (_req, res) => {
@@ -78,7 +87,16 @@ app.use('/api/blog', blogRoutes);
 app.use('/api/tickets', ticketsRoutes);
 app.use('/api/calendar', calendarRoutes);
 app.use('/api/home', homeRoutes);
+app.use('/api/store', storeRoutes);
 app.use('/api/admin', adminRoutes);
+
+const odyBridgeScript = readFileSync(resolve(__dirname, 'lib/ody-bridge.js'), 'utf8');
+app.get(`${CHAT_PREFIX}/ody-bridge.js`, (_req, res) => {
+  res.type('application/javascript').set('Cache-Control', 'public, max-age=3600').send(odyBridgeScript);
+});
+
+app.use(`${STATIC_PREFIX}`, createOdysseusStaticRoute());
+app.use(`${CHAT_PREFIX}/s`, createOdysseusStaticRoute());
 
 // Odysseus AI workspace — proxied for mobile access at creativebuilds.dev/chat
 app.use(CHAT_PREFIX, async (req, res) => {

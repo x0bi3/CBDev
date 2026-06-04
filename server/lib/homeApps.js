@@ -1,16 +1,11 @@
-/** SQL fragment: home_apps visible for optional user id ($1 = int or null). */
+/** SQL fragment: home screen apps for optional user id ($1 = int or null). */
 export const HOME_APPS_VISIBILITY = `
   active = TRUE
   AND (
-    (NOT requires_auth AND NOT assign_users)
+    (NOT requires_auth AND NOT assign_users AND NOT auto_install)
+    OR ($1::int IS NOT NULL AND auto_install = TRUE)
     OR (
       $1::int IS NOT NULL
-      AND requires_auth
-      AND NOT assign_users
-    )
-    OR (
-      $1::int IS NOT NULL
-      AND assign_users
       AND EXISTS (
         SELECT 1 FROM user_home_apps u
         WHERE u.home_app_id = home_apps.id AND u.user_id = $1::int
@@ -18,6 +13,30 @@ export const HOME_APPS_VISIBILITY = `
     )
   )
 `;
+
+/** Store catalog: auth-only apps + assign_users apps user is eligible for. Use table alias `h`. */
+export const STORE_CATALOG_WHERE = `
+  h.active = TRUE
+  AND h.store_visible = TRUE
+  AND h.app_id != 'app-store'
+  AND (
+    (h.requires_auth AND NOT h.assign_users)
+    OR (
+      h.assign_users
+      AND EXISTS (
+        SELECT 1 FROM user_app_eligibility e
+        WHERE e.home_app_id = h.id AND e.user_id = $1::int
+      )
+    )
+  )
+`;
+
+const APP_SELECT = `
+  app_id, label, glyph, tile, screen, portfolio_slug, sort_order,
+  requires_auth, assign_users, launch_type, launch_url, auto_install
+`;
+
+export { APP_SELECT };
 
 export function mapHomeAppRow(row) {
   return {
@@ -28,5 +47,15 @@ export function mapHomeAppRow(row) {
     portfolioSlug: row.portfolio_slug,
     requiresAuth: row.requires_auth,
     assignUsers: row.assign_users,
+    launchType: row.launch_type || 'embedded',
+    launchUrl: row.launch_url || null,
+    autoInstall: !!row.auto_install,
+  };
+}
+
+export function mapStoreAppRow(row) {
+  return {
+    ...mapHomeAppRow(row),
+    installed: !!row.installed,
   };
 }
