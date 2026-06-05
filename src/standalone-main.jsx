@@ -4,7 +4,7 @@ import '@fontsource/inter/500.css';
 import '@fontsource/inter/600.css';
 import '@fontsource/inter/700.css';
 
-import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useMemo, useCallback, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import { motion, AnimatePresence, LayoutGroup, useMotionValue, useTransform, Reorder, useAnimationControls } from 'framer-motion';
 import { DeviceCtx, useDevice } from './context/DeviceContext.jsx';
@@ -121,25 +121,59 @@ function DeviceProvider({ children }) {
   authRef.current = auth;
   const [authOpen, setAuthOpen] = useState(false);
   const [installCelebrateId, setInstallCelebrateId] = useState(null);
-  const [screenApps, setScreenApps] = useState({ home: homeApps, dock: dockApps });
+  const [suppressTileMorph, setSuppressTileMorph] = useState(false);
+  const pendingInstallCelebrateRef = useRef(null);
+  const [authReady, setAuthReady] = useState(false);
+  const [bootReady, setBootReady] = useState(false);
+  const [appsFetchDone, setAppsFetchDone] = useState(false);
+  const [screenApps, setScreenApps] = useState({ home: [], dock: [] });
   const screenAppsRef = useRef(screenApps);
   screenAppsRef.current = screenApps;
 
   const loadScreenApps = useCallback(() => {
-    apiCached('/home/apps', {}, API_CACHE_TTL.homeApps, auth?.id)
+    return apiCached('/home/apps', {}, API_CACHE_TTL.homeApps, auth?.id)
       .then((r) => {
-        setScreenApps({
+        const next = {
           home: normalizeHomeFromApi(r.home),
           dock: normalizeDockFromApi(r.home, r.dock),
-        });
+        };
+        screenAppsRef.current = next;
+        setScreenApps(next);
+        return next;
       })
-      .catch(() => { /* keep defaults */ });
+      .catch(() => {
+        const fallback = { home: homeApps, dock: dockApps };
+        screenAppsRef.current = fallback;
+        setScreenApps(fallback);
+        return fallback;
+      });
   }, [auth?.id]);
 
   useEffect(() => {
+    if (!authReady) return;
+    let cancelled = false;
+    setAppsFetchDone(false);
+    setBootReady(false);
     invalidateApiCache('user:');
-    loadScreenApps();
-  }, [loadScreenApps, auth?.id]);
+    loadScreenApps().finally(() => {
+      if (!cancelled) setAppsFetchDone(true);
+    });
+    return () => { cancelled = true; };
+  }, [authReady, loadScreenApps, auth?.id]);
+
+  useLayoutEffect(() => {
+    if (!authReady || !appsFetchDone) return;
+    const hasApps = screenApps.dock.length > 0 || screenApps.home.length > 0;
+    if (!hasApps) return;
+    let frame2;
+    const frame1 = requestAnimationFrame(() => {
+      frame2 = requestAnimationFrame(() => setBootReady(true));
+    });
+    return () => {
+      cancelAnimationFrame(frame1);
+      if (frame2) cancelAnimationFrame(frame2);
+    };
+  }, [authReady, appsFetchDone, screenApps]);
 
   useEffect(() => {
     apiCached('/products', { auth: false }, API_CACHE_TTL.catalog).catch(() => {});
@@ -193,11 +227,14 @@ function DeviceProvider({ children }) {
         localStorage.removeItem(API_TOKEN_KEY);
         localStorage.removeItem('iphone-portfolio:auth');
         setAuthState(null);
+      } finally {
+        setAuthReady(true);
       }
     })();
   }, []);
 
   const celebrateInstall = useCallback((appId) => {
+    if (!appId || appId === 'app-store') return;
     setInstallCelebrateId(appId);
     window.setTimeout(() => setInstallCelebrateId(null), 2600);
   }, []);
@@ -238,6 +275,26 @@ function DeviceProvider({ children }) {
     setOpenAppId(curr => null);
     setPrevAppId(null);
   }, []);
+
+  const closeAppAfterInstall = useCallback((appId) => {
+    pendingInstallCelebrateRef.current = appId;
+    setSuppressTileMorph(true);
+    closeApp();
+  }, [closeApp]);
+
+  useEffect(() => {
+    if (openAppId || shellAppId) return;
+    const appId = pendingInstallCelebrateRef.current;
+    if (!appId) return;
+    const onHome = screenAppsRef.current.home.some((a) => a.id === appId)
+      || screenAppsRef.current.dock.some((a) => a.id === appId);
+    if (!onHome) return;
+    pendingInstallCelebrateRef.current = null;
+    setSuppressTileMorph(false);
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => celebrateInstall(appId));
+    });
+  }, [openAppId, shellAppId, screenApps, celebrateInstall]);
 
   // Single app shell: mount on open, unmount after close animation (see AppView).
   useEffect(() => {
@@ -302,11 +359,11 @@ function DeviceProvider({ children }) {
     eyeId, setEye:setEyeId,
     homePage, setHomePage,
     openFolderId, openFolder, closeFolder,
-    openAppId, prevAppId, shellAppId, openApp, closeApp, handleShellExitComplete,
+    openAppId, prevAppId, shellAppId, openApp, closeApp, closeAppAfterInstall, handleShellExitComplete,
     ccOpen, toggleCc, closeCc,
     appOrder, setAppOrder, resetAppOrder,
     auth, setAuth, authOpen, openAuth, closeAuth, screenApps, refreshHomeApps: loadScreenApps,
-    celebrateInstall, installCelebrateId,
+    celebrateInstall, installCelebrateId, suppressTileMorph, bootReady,
     findApp: (id) => findApp(id, screenApps),
     profileBtnRef, themeBtnRef, musicBtnRef,
     // music
@@ -316,9 +373,9 @@ function DeviceProvider({ children }) {
     miniPlayerOpen, openMiniPlayer, closeMiniPlayer,
     // gesture lock
     dragLocked, lockDrag, unlockDrag,
-  }), [themeId, eyeId, homePage, openFolderId, openAppId, prevAppId, shellAppId, ccOpen, appOrder, auth, authOpen, screenApps, loadScreenApps, installCelebrateId,
+  }), [themeId, eyeId, homePage, openFolderId, openAppId, prevAppId, shellAppId, ccOpen, appOrder, auth, authOpen, screenApps, loadScreenApps, installCelebrateId, suppressTileMorph, bootReady,
       musicCurrent, musicPlaying, musicVolume, musicStatus, miniPlayerOpen, dragLocked,
-      openFolder, closeFolder, openApp, closeApp, handleShellExitComplete, setAppOrder, resetAppOrder, setAuth, openAuth, closeAuth, celebrateInstall,
+      openFolder, closeFolder, openApp, closeApp, closeAppAfterInstall, handleShellExitComplete, setAppOrder, resetAppOrder, setAuth, openAuth, closeAuth, celebrateInstall,
       toggleCc, closeCc, playStation, togglePlay, setMusicVolume, openMiniPlayer, closeMiniPlayer,
       lockDrag, unlockDrag]);
   return <DeviceCtx.Provider value={value}>{children}</DeviceCtx.Provider>;
@@ -2585,7 +2642,7 @@ const CONTENT_CLOSE_S = 0.30;
 const TILE_CLOSE_S = 1.30; // 1s longer than content so tile lingers during morph-back
 
 function AppView({ app, isOpen, onClose, onExitComplete }) {
-  const { openAppId, prevAppId, openApp, dragLocked, findApp: resolveApp } = useDevice();
+  const { openAppId, prevAppId, openApp, dragLocked, findApp: resolveApp, suppressTileMorph } = useDevice();
   const [View, setView] = useState(null);
   const [viewLoading, setViewLoading] = useState(true);
 
@@ -2621,7 +2678,7 @@ function AppView({ app, isOpen, onClose, onExitComplete }) {
   );
   const hasTileMorph = !!tileLayoutIdRef.current;
   const isReplaced = !isOpen && !!openAppId;
-  const morphClose = hasTileMorph && !enteredViaCrossNav && !isReplaced;
+  const morphClose = hasTileMorph && !enteredViaCrossNav && !isReplaced && !suppressTileMorph;
 
   const closeTarget = enteredViaCrossNav
     ? { y: 80, opacity: 0, scale: 0.96 }
@@ -3237,14 +3294,14 @@ function MiniPlayer() {
 
 /* ========================= DEVICE ROOT ========================= */
 function Device() {
-  const { themeId, openAppId, openFolderId, shellAppId, closeApp, closeFolder, handleShellExitComplete, audioRef, findApp: resolveApp } = useDevice();
+  const { themeId, openAppId, openFolderId, shellAppId, closeApp, closeFolder, handleShellExitComplete, audioRef, findApp: resolveApp, bootReady } = useDevice();
   const theme = themes[themeId];
 
   const shellApp = shellAppId ? resolveApp(shellAppId) : null;
   const isShellOpen = !!openAppId && openAppId === shellAppId;
 
   return (
-    <div className="relative h-full w-full overflow-hidden font-sf">
+    <div className={'relative h-full w-full overflow-hidden font-sf' + (bootReady ? '' : ' invisible')}>
       <Wallpaper theme={theme} appDimmed={!!openAppId} folderDimmed={!!openFolderId && !openAppId} />
       <LayoutGroup>
         <div className="pointer-events-none absolute inset-x-0 top-0 z-50">
@@ -3287,17 +3344,33 @@ function Device() {
   );
 }
 
+function BootSplash({ ready }) {
+  useEffect(() => {
+    const boot = document.getElementById('boot');
+    if (!boot) return;
+    if (ready) boot.classList.add('hide');
+    else boot.classList.remove('hide');
+  }, [ready]);
+  return null;
+}
+
 function App() {
+  const { bootReady } = useDevice();
+  return (
+    <>
+      <BootSplash ready={bootReady} />
+      <Device />
+    </>
+  );
+}
+
+function DeviceApp() {
   return (
     <DeviceProvider>
-      <Device />
+      <App />
     </DeviceProvider>
   );
 }
 
 /* ========================= BOOT ========================= */
-createRoot(document.getElementById('root')).render(<App />);
-requestAnimationFrame(() => {
-  const boot = document.getElementById('boot');
-  if (boot) { boot.classList.add('hide'); setTimeout(() => boot.remove(), 600); }
-});
+createRoot(document.getElementById('root')).render(<DeviceApp />);

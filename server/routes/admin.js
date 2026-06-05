@@ -354,14 +354,18 @@ router.post('/home-apps', async (req, res) => {
   const { rows } = await query(
     `INSERT INTO home_apps (
        app_id, label, glyph, tile, screen, portfolio_slug, sort_order,
-       requires_auth, assign_users, active, launch_type, launch_url, store_visible, auto_install
+       requires_auth, assign_users, active, launch_type, launch_url, store_visible, auto_install,
+       store_description, store_pricing, store_features, store_credits
      )
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING *`,
     [
       b.app_id, b.label, b.glyph || '📱', b.tile, b.screen || 'home', b.portfolio_slug || null,
       b.sort_order ?? 0, !!b.requires_auth || assignUsers, assignUsers, b.active !== false,
       b.launch_type || 'embedded', b.launch_url || null,
       b.store_visible !== false, !!b.auto_install,
+      b.store_description || null, b.store_pricing || null,
+      JSON.stringify(Array.isArray(b.store_features) ? b.store_features : []),
+      b.store_credits || null,
     ],
   );
   if (assignUsers && b.user_ids) await syncHomeAppEligibility(rows[0].id, b.user_ids);
@@ -375,13 +379,18 @@ router.put('/home-apps/:id', async (req, res) => {
     `UPDATE home_apps SET
        app_id=$1, label=$2, glyph=$3, tile=$4, screen=$5, portfolio_slug=$6, sort_order=$7,
        requires_auth=$8, assign_users=$9, active=$10, launch_type=$11, launch_url=$12,
-       store_visible=$13, auto_install=$14
-     WHERE id=$15 RETURNING *`,
+       store_visible=$13, auto_install=$14,
+       store_description=$15, store_pricing=$16, store_features=$17, store_credits=$18
+     WHERE id=$19 RETURNING *`,
     [
       b.app_id, b.label, b.glyph, b.tile, b.screen, b.portfolio_slug || null, b.sort_order ?? 0,
       !!b.requires_auth || assignUsers, assignUsers, b.active !== false,
       b.launch_type || 'embedded', b.launch_url || null,
-      b.store_visible !== false, !!b.auto_install, req.params.id,
+      b.store_visible !== false, !!b.auto_install,
+      b.store_description || null, b.store_pricing || null,
+      JSON.stringify(Array.isArray(b.store_features) ? b.store_features : []),
+      b.store_credits || null,
+      req.params.id,
     ],
   );
   if (!rows[0]) { res.status(404).json({ error: 'Not found' }); return; }

@@ -510,7 +510,12 @@ function HomeAppsSection() {
       app_id: '', label: '', glyph: '📱', tile: 'linear-gradient(135deg,#6366f1,#8b5cf6)',
       screen: 'home', active: true, requires_auth: false, assign_users: false, user_ids: [],
       launch_type: 'embedded', launch_url: '', store_visible: true, auto_install: false,
+      store_description: '', store_pricing: '', store_features: [], store_credits: '',
     };
+    if (row && !Array.isArray(base.store_features)) {
+      try { base.store_features = JSON.parse(base.store_features || '[]'); }
+      catch { base.store_features = []; }
+    }
     if (row?.id) {
       const a = await api('/admin/home-apps/' + row.id + '/assignments');
       setEdit({ ...base, user_ids: a.user_ids || [] });
@@ -590,6 +595,29 @@ function HomeAppsSection() {
                 <input type="checkbox" checked={edit.store_visible !== false} onChange={e => setEdit({ ...edit, store_visible: e.target.checked })} />
                 Visible in Service Center catalog
               </label>
+              {edit.store_visible !== false && (
+                <div className="rounded-lg border border-slate-600 bg-slate-800/50 p-3 space-y-3">
+                  <p className="text-xs font-medium text-slate-400">Service Center listing (tap for details)</p>
+                  <Field label="Description">
+                    <textarea className={inputCls() + ' min-h-[72px]'} value={edit.store_description || ''}
+                      onChange={e => setEdit({ ...edit, store_description: e.target.value })} placeholder="What this service does…" />
+                  </Field>
+                  <Field label="Pricing">
+                    <input className={inputCls()} value={edit.store_pricing || ''}
+                      onChange={e => setEdit({ ...edit, store_pricing: e.target.value })} placeholder="e.g. $29/mo · Included · Free trial" />
+                  </Field>
+                  <Field label="Features (one per line)">
+                    <textarea className={inputCls() + ' min-h-[72px]'}
+                      value={(edit.store_features || []).join('\n')}
+                      onChange={e => setEdit({ ...edit, store_features: e.target.value.split('\n').map(s => s.trim()).filter(Boolean) })}
+                      placeholder="Feature one&#10;Feature two" />
+                  </Field>
+                  <Field label="Credits">
+                    <input className={inputCls()} value={edit.store_credits || ''}
+                      onChange={e => setEdit({ ...edit, store_credits: e.target.value })} placeholder="Built by … · Powered by …" />
+                  </Field>
+                </div>
+              )}
               <label className="flex items-center gap-2 text-sm text-slate-300">
                 <input type="checkbox" checked={!!edit.auto_install} disabled={!!edit.assign_users}
                   onChange={e => setEdit({ ...edit, auto_install: e.target.checked })} />

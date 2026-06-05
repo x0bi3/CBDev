@@ -11,6 +11,7 @@ router.get('/apps', requireAuth, async (req, res) => {
     const { rows } = await query(
       `SELECT h.app_id, h.label, h.glyph, h.tile, h.screen, h.portfolio_slug, h.sort_order,
               h.requires_auth, h.assign_users, h.launch_type, h.launch_url, h.auto_install,
+              h.store_description, h.store_pricing, h.store_features, h.store_credits,
               (
                 EXISTS (
                   SELECT 1 FROM user_home_apps u

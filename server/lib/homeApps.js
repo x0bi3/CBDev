@@ -33,8 +33,31 @@ export const STORE_CATALOG_WHERE = `
 
 const APP_SELECT = `
   app_id, label, glyph, tile, screen, portfolio_slug, sort_order,
-  requires_auth, assign_users, launch_type, launch_url, auto_install
+  requires_auth, assign_users, launch_type, launch_url, auto_install,
+  store_description, store_pricing, store_features, store_credits
 `;
+
+function parseStoreFeatures(raw) {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw.map(String).filter(Boolean);
+  if (typeof raw === 'string') {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed.map(String).filter(Boolean);
+    } catch (_) { /* fall through */ }
+    return raw.split('\n').map((s) => s.trim()).filter(Boolean);
+  }
+  return [];
+}
+
+function mapStoreListing(row) {
+  return {
+    description: row.store_description || null,
+    pricing: row.store_pricing || null,
+    features: parseStoreFeatures(row.store_features),
+    credits: row.store_credits || null,
+  };
+}
 
 /** Home apps list — pass user id as $1 for user_installed flag. */
 export const HOME_APP_SELECT = `
@@ -70,5 +93,8 @@ export function mapStoreAppRow(row) {
   return {
     ...mapHomeAppRow(row),
     installed: !!row.installed,
+    ...mapStoreListing(row),
   };
 }
+
+export { parseStoreFeatures, mapStoreListing };
