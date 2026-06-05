@@ -1,4 +1,28 @@
-const RESEND_API = 'https://api.resend.com/emails';
+import https from 'node:https';
+
+function postResend(apiKey, payload) {
+  const data = JSON.stringify(payload);
+  return new Promise((resolve, reject) => {
+    const req = https.request({
+      hostname: 'api.resend.com',
+      path: '/emails',
+      method: 'POST',
+      family: 4,
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(data),
+      },
+    }, (res) => {
+      let body = '';
+      res.on('data', (chunk) => { body += chunk; });
+      res.on('end', () => resolve({ status: res.statusCode, body }));
+    });
+    req.on('error', reject);
+    req.write(data);
+    req.end();
+  });
+}
 
 export async function notifyNewTicket(ticket, message) {
   const apiKey = process.env.RESEND_API_KEY;
@@ -27,23 +51,11 @@ export async function notifyNewTicket(ticket, message) {
   ].join('\n');
 
   try {
-    const res = await fetch(RESEND_API, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        from,
-        to: [to],
-        reply_to: replyEmail.includes('@tickets.creativebuilds.dev') ? undefined : replyEmail,
-        subject,
-        text,
-      }),
-    });
-    if (!res.ok) {
-      const err = await res.text();
-      console.error('notifyEmail: Resend failed', res.status, err);
+    const payload = { from, to: [to], subject, text };
+    if (!replyEmail.includes('@tickets.creativebuilds.dev')) payload.reply_to = replyEmail;
+    const res = await postResend(apiKey, payload);
+    if (res.status < 200 || res.status >= 300) {
+      console.error('notifyEmail: Resend failed', res.status, res.body);
       return false;
     }
     return true;
