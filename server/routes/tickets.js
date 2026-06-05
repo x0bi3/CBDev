@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { query } from '../db.js';
 import { requireAuth, optionalAuth } from '../auth.js';
-import { notifyNewTicket } from '../lib/notifyEmail.js';
+import { notifyNewTicket, sendTicketConfirmation } from '../lib/email.js';
 
 const router = Router();
 
@@ -96,6 +96,7 @@ router.post('/', optionalAuth, async (req, res) => {
     );
 
     notifyNewTicket(ticket, message).catch(() => {});
+    sendTicketConfirmation(ticket, message).catch(() => {});
 
     res.status(201).json({ ticket: mapTicket(ticket) });
   } catch (err) {

@@ -5,6 +5,7 @@ import { productImageUpload } from '../lib/uploads.js';
 import { sanitizeHtml, resolveBodyHtml } from '../lib/blogHtml.js';
 import { runBlogAssist } from '../lib/blogWritingAssist.js';
 import { refreshBlogIdeasNow } from '../lib/blogIdeasScheduler.js';
+import { sendNewsletterBroadcast } from '../lib/email.js';
 
 const router = Router();
 router.use(requireAdmin);
@@ -522,6 +523,83 @@ router.get('/newsletter', async (_req, res) => {
 router.delete('/newsletter/:id', async (req, res) => {
   await query('DELETE FROM newsletter_subscribers WHERE id = $1', [req.params.id]);
   res.json({ ok: true });
+});
+
+router.get('/newsletter/sends', async (_req, res) => {
+  const { rows } = await query(
+    'SELECT * FROM newsletter_sends ORDER BY sent_at DESC LIMIT 20',
+  );
+  res.json({ sends: rows });
+});
+
+router.post('/newsletter/send', async (req, res) => {
+  try {
+    const subject = String(req.body.subject || '').trim();
+    const body = String(req.body.body || req.body.text || '').trim();
+    const testEmail = req.body.testEmail ? String(req.body.testEmail).trim().toLowerCase() : null;
+
+    if (!subject || !body) {
+      res.status(400).json({ error: 'Subject and body required' });
+      return;
+    }
+
+    let recipients;
+    if (testEmail) {
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(testEmail)) {
+        res.status(400).json({ error: 'Invalid test email' });
+        return;
+      }
+      recipients = [testEmail];
+    } else {
+      const { rows } = await query(
+        `SELECT email FROM newsletter_subscribers WHERE unsubscribed_at IS NULL ORDER BY id`,
+      );
+      recipients = rows.map((r) => r.email);
+      if (!recipients.length) {
+        res.status(400).json({ error: 'No active subscribers' });
+        return;
+      }
+    }
+
+    const results = await sendNewsletterBroadcast({ subject, body, recipients });
+
+    if (!testEmail) {
+      await query(
+        `INSERT INTO newsletter_sends (subject, body_text, recipient_count, failed_count)
+         VALUES ($1,$2,$3,$4)`,
+        [subject, body, results.sent, results.failed],
+      );
+    }
+
+    res.json({ ok: true, ...results, total: recipients.length });
+  } catch (err) {
+    console.error('newsletter send:', err);
+    res.status(500).json({ error: 'Send failed' });
+  }
+});
+
+/* ---------- Merch orders ---------- */
+router.get('/orders', async (_req, res) => {
+  const { rows } = await query(
+    `SELECT o.*,
+      COALESCE(
+        json_agg(
+          json_build_object(
+            'product_name', i.product_name,
+            'variant_label', i.variant_label,
+            'quantity', i.quantity,
+            'line_total_cents', i.line_total_cents
+          ) ORDER BY i.id
+        ) FILTER (WHERE i.id IS NOT NULL),
+        '[]'
+      ) AS items
+     FROM merch_orders o
+     LEFT JOIN merch_order_items i ON i.order_id = o.id
+     GROUP BY o.id
+     ORDER BY o.created_at DESC
+     LIMIT 100`,
+  );
+  res.json({ orders: rows });
 });
 
 export default router;

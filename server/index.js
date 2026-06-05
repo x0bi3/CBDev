@@ -11,6 +11,7 @@ import ticketsRoutes from './routes/tickets.js';
 import calendarRoutes from './routes/calendar.js';
 import homeRoutes from './routes/home.js';
 import storeRoutes from './routes/store.js';
+import ordersRoutes from './routes/orders.js';
 import adminRoutes from './routes/admin.js';
 import { pool } from './db.js';
 import { ensureUploadDirs } from './lib/uploads.js';
@@ -88,6 +89,7 @@ app.use('/api/tickets', ticketsRoutes);
 app.use('/api/calendar', calendarRoutes);
 app.use('/api/home', homeRoutes);
 app.use('/api/store', storeRoutes);
+app.use('/api/orders', ordersRoutes);
 app.use('/api/admin', adminRoutes);
 
 const odyBridgeScript = readFileSync(resolve(__dirname, 'lib/ody-bridge.js'), 'utf8');

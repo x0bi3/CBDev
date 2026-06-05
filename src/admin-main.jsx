@@ -792,6 +792,152 @@ function Dashboard({ stats }) {
   );
 }
 
+function NewsletterSection() {
+  const [subs, setSubs] = useState([]);
+  const [sends, setSends] = useState([]);
+  const [subject, setSubject] = useState('');
+  const [body, setBody] = useState('');
+  const [testEmail, setTestEmail] = useState('');
+  const [status, setStatus] = useState('');
+  const [sending, setSending] = useState(false);
+
+  const reload = () => {
+    api('/admin/newsletter').then(r => setSubs(r.subscribers)).catch(console.error);
+    api('/admin/newsletter/sends').then(r => setSends(r.sends)).catch(() => {});
+  };
+
+  useEffect(() => { reload(); }, []);
+
+  const send = async (testOnly) => {
+    if (testOnly && !testEmail.trim()) {
+      setStatus('Enter a test email first');
+      return;
+    }
+    setSending(true);
+    setStatus('');
+    try {
+      const r = await api('/admin/newsletter/send', {
+        method: 'POST',
+        body: testOnly ? { subject, body, testEmail: testEmail.trim() } : { subject, body },
+      });
+      setStatus(testOnly
+        ? `Test sent to ${testEmail} (${r.sent}/${r.total} ok)`
+        : `Broadcast sent — ${r.sent} delivered, ${r.failed} failed`);
+      if (!testOnly) reload();
+    } catch (ex) {
+      setStatus(ex.message);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div className="space-y-8">
+      <div>
+        <h2 className="text-xl font-semibold">Send newsletter</h2>
+        <p className="mt-1 text-sm text-slate-400">{subs.filter(s => !s.unsubscribed_at).length} active subscribers</p>
+        <div className="mt-4 max-w-2xl space-y-3">
+          <input className="w-full rounded-lg border border-slate-600 bg-slate-800 px-3 py-2" placeholder="Subject" value={subject} onChange={e => setSubject(e.target.value)} />
+          <textarea className="min-h-[160px] w-full rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 font-mono text-sm" placeholder="Plain-text body" value={body} onChange={e => setBody(e.target.value)} />
+          <div className="flex flex-wrap items-center gap-2">
+            <input className="rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-sm" placeholder="Test email (optional)" value={testEmail} onChange={e => setTestEmail(e.target.value)} type="email" />
+            <Btn onClick={() => send(true)} className="disabled:opacity-50" disabled={sending || !subject || !body}>Send test</Btn>
+            <Btn variant="danger" onClick={() => { if (confirm(`Send to ${subs.filter(s => !s.unsubscribed_at).length} subscribers?`)) send(false); }} className="disabled:opacity-50" disabled={sending || !subject || !body}>Send to all</Btn>
+          </div>
+          {status && <p className="text-sm text-slate-300">{status}</p>}
+        </div>
+      </div>
+      {sends.length > 0 && (
+        <div>
+          <h3 className="text-lg font-medium">Recent sends</h3>
+          <Table columns={[
+            { key: 'subject', label: 'Subject' },
+            { key: 'recipient_count', label: 'Sent' },
+            { key: 'failed_count', label: 'Failed' },
+            { key: 'sent_at', label: 'When', render: r => new Date(r.sent_at).toLocaleString() },
+          ]} rows={sends} onEdit={() => {}} onDelete={() => {}} />
+        </div>
+      )}
+      <div>
+        <h2 className="text-xl font-semibold">Subscribers</h2>
+        <Table columns={[
+          { key: 'email', label: 'Email' },
+          { key: 'created_at', label: 'Joined', render: r => new Date(r.created_at).toLocaleDateString() },
+          { key: 'unsubscribed_at', label: 'Status', render: r => r.unsubscribed_at ? 'Unsubscribed' : 'Active' },
+        ]} rows={subs} onEdit={() => {}} onDelete={async r => {
+          if (confirm('Remove subscriber?')) {
+            await api('/admin/newsletter/' + r.id, { method: 'DELETE' });
+            reload();
+          }
+        }} />
+      </div>
+    </div>
+  );
+}
+
+function OrdersSection() {
+  const [orders, setOrders] = useState([]);
+  const [expanded, setExpanded] = useState(null);
+
+  useEffect(() => {
+    api('/admin/orders').then(r => setOrders(r.orders)).catch(console.error);
+  }, []);
+
+  const money = (cents) => '£' + (cents / 100).toFixed(2);
+
+  return (
+    <div>
+      <h2 className="text-xl font-semibold">Merch orders</h2>
+      <p className="mt-1 text-sm text-slate-400">{orders.length} recent orders</p>
+      <div className="mt-4 overflow-x-auto rounded-xl border border-slate-700">
+        <table className="w-full text-left text-sm">
+          <thead className="bg-slate-800/80 text-xs uppercase text-slate-400">
+            <tr>
+              <th className="px-4 py-3">Order</th>
+              <th className="px-4 py-3">Customer</th>
+              <th className="px-4 py-3">Total</th>
+              <th className="px-4 py-3">Date</th>
+              <th className="px-4 py-3" />
+            </tr>
+          </thead>
+          <tbody>
+            {orders.map(o => (
+              <React.Fragment key={o.id}>
+                <tr className="border-t border-slate-700/80 hover:bg-slate-800/40">
+                  <td className="px-4 py-2.5 font-mono text-xs">{o.order_number}</td>
+                  <td className="px-4 py-2.5">
+                    <div>{o.customer_name}</div>
+                    <div className="text-xs text-slate-400">{o.email}</div>
+                  </td>
+                  <td className="px-4 py-2.5">{money(o.subtotal_cents)}</td>
+                  <td className="px-4 py-2.5">{new Date(o.created_at).toLocaleString()}</td>
+                  <td className="px-4 py-2.5">
+                    <Btn variant="ghost" onClick={() => setExpanded(expanded === o.id ? null : o.id)}>
+                      {expanded === o.id ? 'Hide' : 'Items'}
+                    </Btn>
+                  </td>
+                </tr>
+                {expanded === o.id && (
+                  <tr className="border-t border-slate-700/50 bg-slate-900/60">
+                    <td colSpan={5} className="px-4 py-3 text-sm text-slate-300">
+                      <p>{o.address_line}, {o.city} {o.postcode}</p>
+                      <ul className="mt-2 list-disc pl-5">
+                        {(o.items || []).map((it, i) => (
+                          <li key={i}>{it.quantity}× {it.product_name}{it.variant_label ? ` (${it.variant_label})` : ''} — {money(it.line_total_cents)}</li>
+                        ))}
+                      </ul>
+                    </td>
+                  </tr>
+                )}
+              </React.Fragment>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 const NAV = [
   ['dashboard', 'Dashboard'],
   ['products', 'Products'],
@@ -800,16 +946,15 @@ const NAV = [
   ['home-apps', 'Home apps'],
   ['calendar', 'Calendar'],
   ['tickets', 'Tickets'],
+  ['orders', 'Orders'],
   ['newsletter', 'Newsletter'],
 ];
 
 function AdminApp({ user, onLogout }) {
   const [section, setSection] = useState('dashboard');
   const [stats, setStats] = useState(null);
-  const [subs, setSubs] = useState([]);
   useEffect(() => {
     api('/admin/stats').then(setStats).catch(console.error);
-    if (section === 'newsletter') api('/admin/newsletter').then(r => setSubs(r.subscribers));
   }, [section]);
 
   const content = {
@@ -820,12 +965,8 @@ function AdminApp({ user, onLogout }) {
     'home-apps': <HomeAppsSection />,
     calendar: <CalendarSection />,
     tickets: <TicketsSection />,
-    newsletter: (
-      <div>
-        <h2 className="text-xl font-semibold">Newsletter subscribers</h2>
-        <Table columns={[{key:'email',label:'Email'},{key:'created_at',label:'Joined',render:r=>new Date(r.created_at).toLocaleDateString()}]} rows={subs} onEdit={()=>{}} onDelete={async r=>{if(confirm('Remove?')){await api('/admin/newsletter/'+r.id,{method:'DELETE'});api('/admin/newsletter').then(x=>setSubs(x.subscribers));}}} />
-      </div>
-    ),
+    orders: <OrdersSection />,
+    newsletter: <NewsletterSection />,
   };
 
   return (

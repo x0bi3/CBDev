@@ -1223,7 +1223,8 @@ function MerchApp() {
       <CartPanel open={cartOpen} onClose={() => { setCartOpen(false); setCheckoutStage(null); }}
         cart={cart} cartTotal={cartTotal} removeFromCart={removeFromCart} setQty={setQty}
         checkoutStage={checkoutStage} setCheckoutStage={setCheckoutStage}
-        clearCart={() => { setCart([]); setCheckoutStage(null); }} />
+        clearCart={() => { setCart([]); setCheckoutStage(null); }}
+        onOrderPlaced={() => { setCart([]); setCheckoutStage('done'); }} />
     </>
   );
 }
@@ -1298,7 +1299,40 @@ function ProductDetail({ product, onAdd }) {
   );
 }
 
-function CartPanel({ open, onClose, cart, cartTotal, removeFromCart, setQty, checkoutStage, setCheckoutStage, clearCart }) {
+function CartPanel({ open, onClose, cart, cartTotal, removeFromCart, setQty, checkoutStage, setCheckoutStage, clearCart, onOrderPlaced }) {
+  const [shipping, setShipping] = useState(null);
+  const [orderErr, setOrderErr] = useState(null);
+  const [placing, setPlacing] = useState(false);
+
+  const placeOrder = async () => {
+    if (!shipping || !cart.length) return;
+    setPlacing(true);
+    setOrderErr(null);
+    try {
+      await api('/orders', {
+        auth: false,
+        method: 'POST',
+        body: {
+          email: shipping.email,
+          customerName: shipping.name,
+          addressLine: shipping.addr,
+          city: shipping.city,
+          postcode: shipping.zip,
+          items: cart.map((item) => ({
+            id: item.id,
+            qty: item.qty,
+            variant: item.variant,
+          })),
+        },
+      });
+      onOrderPlaced();
+    } catch (err) {
+      setOrderErr(err.message || 'Order failed');
+    } finally {
+      setPlacing(false);
+    }
+  };
+
   return (
     <AnimatePresence>
       {open && (
@@ -1337,9 +1371,20 @@ function CartPanel({ open, onClose, cart, cartTotal, removeFromCart, setQty, che
                   <button onClick={() => { clearCart(); onClose(); }} className="mt-3 rounded-full bg-white/10 px-4 py-2 text-[13px] font-medium hover:bg-white/20">Keep shopping</button>
                 </div>
               ) : checkoutStage === 'address' ? (
-                <CheckoutAddress onBack={() => setCheckoutStage(null)} onNext={() => setCheckoutStage('payment')} />
+                <CheckoutAddress
+                  initial={shipping}
+                  onBack={() => setCheckoutStage(null)}
+                  onNext={(addr) => { setShipping(addr); setCheckoutStage('payment'); }}
+                />
               ) : checkoutStage === 'payment' ? (
-                <CheckoutPayment total={cartTotal} onBack={() => setCheckoutStage('address')} onPay={() => setCheckoutStage('done')} />
+                <CheckoutPayment
+                  total={cartTotal}
+                  email={shipping?.email}
+                  onBack={() => setCheckoutStage('address')}
+                  onPay={placeOrder}
+                  placing={placing}
+                  err={orderErr}
+                />
               ) : (
                 <ul className="flex flex-col gap-3">
                   {cart.map(item => (
@@ -1380,12 +1425,13 @@ function CartPanel({ open, onClose, cart, cartTotal, removeFromCart, setQty, che
   );
 }
 
-function CheckoutAddress({ onBack, onNext }) {
-  const [f, setF] = useState({ name:'', addr:'', city:'', zip:'' });
+function CheckoutAddress({ onBack, onNext, initial }) {
+  const [f, setF] = useState(() => initial || { name:'', email:'', addr:'', city:'', zip:'' });
   const set = (k,v) => setF(s => ({ ...s, [k]:v }));
   return (
-    <form onSubmit={e => { e.preventDefault(); onNext(); }} className="flex flex-col gap-3">
+    <form onSubmit={e => { e.preventDefault(); onNext(f); }} className="flex flex-col gap-3">
       <p className="text-[12px] uppercase tracking-wider text-white/55">Shipping address</p>
+      <input required type="email" value={f.email} onChange={e => set('email', e.target.value)} placeholder="Email for confirmation" className="rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-[14px] outline-none focus:border-white/30" />
       <input required value={f.name} onChange={e => set('name', e.target.value)} placeholder="Full name" className="rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-[14px] outline-none focus:border-white/30" />
       <input required value={f.addr} onChange={e => set('addr', e.target.value)} placeholder="Address" className="rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-[14px] outline-none focus:border-white/30" />
       <div className="grid grid-cols-2 gap-2">
@@ -1399,12 +1445,13 @@ function CheckoutAddress({ onBack, onNext }) {
     </form>
   );
 }
-function CheckoutPayment({ total, onBack, onPay }) {
+function CheckoutPayment({ total, email, onBack, onPay, placing, err }) {
   const [f, setF] = useState({ card:'', exp:'', cvc:'' });
   const set = (k,v) => setF(s => ({ ...s, [k]:v }));
   return (
     <form onSubmit={e => { e.preventDefault(); onPay(); }} className="flex flex-col gap-3">
       <p className="text-[12px] uppercase tracking-wider text-white/55">Payment</p>
+      {email && <p className="text-[12px] text-white/55">Confirmation → {email}</p>}
       <input required value={f.card} onChange={e => set('card', e.target.value)} placeholder="Card number" inputMode="numeric" className="rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-[14px] outline-none focus:border-white/30" />
       <div className="grid grid-cols-2 gap-2">
         <input required value={f.exp} onChange={e => set('exp', e.target.value)} placeholder="MM / YY" className="rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-[14px] outline-none focus:border-white/30" />
@@ -1414,9 +1461,12 @@ function CheckoutPayment({ total, onBack, onPay }) {
         <span className="text-white/65">Total due</span>
         <span className="text-[16px] font-semibold tabular-nums">£{total}</span>
       </div>
+      {err && <p className="text-[12px] text-rose-300">{err}</p>}
       <div className="mt-2 flex gap-2">
-        <button type="button" onClick={onBack} className="flex-1 rounded-2xl border border-white/15 py-2.5 text-[14px] font-semibold text-white/80">Back</button>
-        <button type="submit" className="flex-[2] rounded-2xl bg-white py-2.5 text-[14px] font-semibold text-black active:scale-[0.98]">Pay £{total}</button>
+        <button type="button" onClick={onBack} disabled={placing} className="flex-1 rounded-2xl border border-white/15 py-2.5 text-[14px] font-semibold text-white/80 disabled:opacity-60">Back</button>
+        <button type="submit" disabled={placing} className="flex-[2] rounded-2xl bg-white py-2.5 text-[14px] font-semibold text-black active:scale-[0.98] disabled:opacity-60">
+          {placing ? 'Placing order…' : `Pay £${total}`}
+        </button>
       </div>
     </form>
   );

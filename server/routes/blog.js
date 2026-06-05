@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { query } from '../db.js';
 import { resolveBodyHtml } from '../lib/blogHtml.js';
+import { sendNewsletterWelcome } from '../lib/email.js';
 
 const router = Router();
 
@@ -63,11 +64,13 @@ router.post('/newsletter', async (req, res) => {
       res.status(400).json({ error: 'Valid email required' });
       return;
     }
-    await query(
+    const { rows } = await query(
       `INSERT INTO newsletter_subscribers (email) VALUES ($1)
-       ON CONFLICT (email) DO NOTHING`,
+       ON CONFLICT (email) DO NOTHING
+       RETURNING id`,
       [email],
     );
+    if (rows[0]) sendNewsletterWelcome(email).catch(() => {});
     res.status(201).json({ ok: true });
   } catch (err) {
     console.error('newsletter:', err);
