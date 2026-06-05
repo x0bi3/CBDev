@@ -649,7 +649,33 @@ function ContactApp() {
   const [email, setEmail] = useState('');
   const [message, setMessage] = useState('');
   const [sent, setSent] = useState(false);
-  const submit = (e) => { e.preventDefault(); setSent(true); };
+  const [submitting, setSubmitting] = useState(false);
+  const [submitErr, setSubmitErr] = useState(null);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setSubmitErr(null);
+    setSubmitting(true);
+    try {
+      await api('/tickets', {
+        auth: false,
+        method: 'POST',
+        body: {
+          subject: 'Contact form',
+          message: message.trim(),
+          contactName: name.trim(),
+          email: email.trim(),
+          category: 'Contact',
+        },
+      });
+      setSent(true);
+    } catch (err) {
+      setSubmitErr(err.message || 'Failed to send message');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   return (
     <AppShell title="Contact" subtitle="Let's build something memorable.">
       <Card>
@@ -678,7 +704,11 @@ function ContactApp() {
               className="rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-[14px] outline-none focus:border-white/30" />
             <textarea required rows="4" value={message} onChange={e => setMessage(e.target.value)} placeholder="How can we help?"
               className="resize-none rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-[14px] outline-none focus:border-white/30" />
-            <button type="submit" className="rounded-2xl bg-white py-3 text-[15px] font-semibold text-black transition active:scale-[0.98]">Send message</button>
+            {submitErr && <p className="text-[12px] text-rose-300">{submitErr}</p>}
+            <button type="submit" disabled={submitting}
+              className="rounded-2xl bg-white py-3 text-[15px] font-semibold text-black transition active:scale-[0.98] disabled:opacity-60">
+              {submitting ? 'Sending…' : 'Send message'}
+            </button>
           </form>
         )}
       </Card>
@@ -813,10 +843,42 @@ function ServiceContactForm({ service, onDone }) {
   const [fieldValue, setFieldValue] = useState(service.formField.options[0]);
   const [message, setMessage] = useState(() => defaultMsg(service.formField.options[0]));
   const [touchedMsg, setTouchedMsg] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitErr, setSubmitErr] = useState(null);
   useEffect(() => { if (!touchedMsg) setMessage(defaultMsg(fieldValue)); }, [fieldValue, touchedMsg]);
 
+  const submit = async (e) => {
+    e.preventDefault();
+    setSubmitErr(null);
+    setSubmitting(true);
+    try {
+      const body = [
+        message.trim(),
+        '',
+        `${service.formField.label}: ${fieldValue}`,
+      ].join('\n');
+      await api('/tickets', {
+        auth: false,
+        method: 'POST',
+        body: {
+          subject: `Services: ${service.title}`,
+          message: body,
+          contactName: name.trim() || email.split('@')[0] || 'Website visitor',
+          email: email.trim(),
+          contactPhone: phone.trim() || undefined,
+          category: 'Services',
+        },
+      });
+      onDone();
+    } catch (err) {
+      setSubmitErr(err.message || 'Failed to send message');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   return (
-    <form onSubmit={e => { e.preventDefault(); onDone(); }} className="flex flex-col gap-3">
+    <form onSubmit={submit} className="flex flex-col gap-3">
       <p className="text-[12px] text-white/60">Most fields are optional. An email and a service type is enough to get started.</p>
 
       <label className="flex flex-col gap-1">
@@ -855,8 +917,12 @@ function ServiceContactForm({ service, onDone }) {
         )}
       </label>
 
+      {submitErr && <p className="text-[12px] text-rose-300">{submitErr}</p>}
       <div className="mt-1 flex">
-        <button type="submit" className="flex-1 rounded-2xl bg-white py-3 text-[14px] font-semibold text-black active:scale-[0.98]">Send message</button>
+        <button type="submit" disabled={submitting}
+          className="flex-1 rounded-2xl bg-white py-3 text-[14px] font-semibold text-black active:scale-[0.98] disabled:opacity-60">
+          {submitting ? 'Sending…' : 'Send message'}
+        </button>
       </div>
     </form>
   );

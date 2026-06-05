@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { query } from '../db.js';
 import { requireAuth, optionalAuth } from '../auth.js';
+import { notifyNewTicket } from '../lib/notifyEmail.js';
 
 const router = Router();
 
@@ -93,6 +94,8 @@ router.post('/', optionalAuth, async (req, res) => {
       `INSERT INTO ticket_messages (ticket_id, sender, body) VALUES ($1, 'user', $2)`,
       [ticket.id, message],
     );
+
+    notifyNewTicket(ticket, message).catch(() => {});
 
     res.status(201).json({ ticket: mapTicket(ticket) });
   } catch (err) {
