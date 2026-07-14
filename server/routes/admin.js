@@ -56,6 +56,7 @@ router.get('/stats', async (_req, res) => {
         (SELECT count(*)::int FROM blog_posts) AS blog_posts,
         (SELECT count(*)::int FROM portfolio_projects WHERE active) AS portfolio,
         (SELECT count(*)::int FROM support_tickets WHERE status = 'open') AS open_tickets,
+        (SELECT count(*)::int FROM inquiry_submissions WHERE status = 'new') AS new_inquiries,
         (SELECT count(*)::int FROM bookings WHERE status = 'confirmed' AND starts_at >= now()) AS upcoming_bookings,
         (SELECT count(*)::int FROM newsletter_subscribers) AS subscribers
     `);
@@ -469,6 +470,31 @@ router.delete('/calendar/bookings/:id', async (req, res) => {
   res.json({ ok: true });
 });
 
+/* ---------- Project inquiries (www marketing form) ---------- */
+router.get('/inquiries', async (_req, res) => {
+  const { rows } = await query(
+    `SELECT id, name, email, company, categories, overview, answers, budget, timeline, status, created_at
+     FROM inquiry_submissions ORDER BY created_at DESC LIMIT 200`,
+  );
+  res.json({ inquiries: rows });
+});
+
+router.get('/inquiries/:id', async (req, res) => {
+  const { rows } = await query('SELECT * FROM inquiry_submissions WHERE id = $1', [req.params.id]);
+  if (!rows[0]) { res.status(404).json({ error: 'Not found' }); return; }
+  res.json({ inquiry: rows[0] });
+});
+
+router.patch('/inquiries/:id', async (req, res) => {
+  const status = req.body.status ? String(req.body.status).trim() : null;
+  const { rows } = await query(
+    `UPDATE inquiry_submissions SET status = COALESCE($1, status) WHERE id = $2 RETURNING *`,
+    [status, req.params.id],
+  );
+  if (!rows[0]) { res.status(404).json({ error: 'Not found' }); return; }
+  res.json({ inquiry: rows[0] });
+});
+
 /* ---------- Tickets ---------- */
 router.get('/tickets', async (_req, res) => {
   const { rows } = await query(
@@ -575,6 +601,58 @@ router.post('/newsletter/send', async (req, res) => {
   } catch (err) {
     console.error('newsletter send:', err);
     res.status(500).json({ error: 'Send failed' });
+  }
+});
+
+/* ---------- Stripe settings ---------- */
+router.get('/stripe/settings', async (_req, res) => {
+  try {
+    const { rows } = await query('SELECT * FROM stripe_settings WHERE id = 1');
+    const hasSecret = !!process.env.STRIPE_SECRET_KEY;
+    const hasWebhook = !!process.env.STRIPE_WEBHOOK_SECRET;
+    res.json({
+      settings: rows[0] || {},
+      configured: hasSecret,
+      webhookConfigured: hasWebhook,
+      publishableKey: process.env.STRIPE_PUBLISHABLE_KEY || null,
+    });
+  } catch (err) {
+    console.error('admin stripe settings:', err);
+    res.status(500).json({ error: 'Failed to load Stripe settings' });
+  }
+});
+
+router.put('/stripe/settings', async (req, res) => {
+  try {
+    const b = req.body;
+    const { rows } = await query(
+      `UPDATE stripe_settings SET
+        publishable_key = COALESCE($1, publishable_key),
+        connect_enabled = COALESCE($2, connect_enabled),
+        blitz_price_cents = COALESCE($3, blitz_price_cents),
+        updated_at = now()
+       WHERE id = 1 RETURNING *`,
+      [b.publishable_key, b.connect_enabled, b.blitz_price_cents],
+    );
+    res.json({ settings: rows[0] });
+  } catch (err) {
+    console.error('admin stripe update:', err);
+    res.status(500).json({ error: 'Failed to update Stripe settings' });
+  }
+});
+
+router.get('/stripe/subscriptions', async (_req, res) => {
+  try {
+    const { rows } = await query(
+      `SELECT hs.*, u.email AS user_email, u.display_name AS user_name
+       FROM hosting_subscriptions hs
+       LEFT JOIN users u ON u.id = hs.user_id
+       ORDER BY hs.created_at DESC LIMIT 100`,
+    );
+    res.json({ subscriptions: rows });
+  } catch (err) {
+    console.error('admin subscriptions:', err);
+    res.status(500).json({ error: 'Failed to load subscriptions' });
   }
 });
 

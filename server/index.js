@@ -12,6 +12,9 @@ import calendarRoutes from './routes/calendar.js';
 import homeRoutes from './routes/home.js';
 import storeRoutes from './routes/store.js';
 import ordersRoutes from './routes/orders.js';
+import inquiryRoutes from './routes/inquiry.js';
+import eventsRoutes from './routes/events.js';
+import stripeRoutes from './routes/stripe.js';
 import adminRoutes from './routes/admin.js';
 import { pool } from './db.js';
 import { ensureUploadDirs } from './lib/uploads.js';
@@ -20,6 +23,7 @@ import { migrateBlogBodyToHtml } from './lib/blogMigrate.js';
 import { createOdysseusProxy, CHAT_PREFIX, STATIC_PREFIX } from './lib/odysseusProxy.js';
 import { createOdysseusStaticRoute } from './lib/odysseusStatic.js';
 import { ensureOdysseusSession } from './lib/odysseusAuth.js';
+import { isAdminHost, isStudioHost } from './lib/urls.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, '..');
@@ -51,21 +55,16 @@ ensureUploadDirs();
 const app = express();
 const PORT = Number(process.env.PORT) || 3020;
 
-const ADMIN_HOSTS = new Set([
-  'admin.creativebuilds.dev',
-  'creativeadmin.cyberopticsoftware.com',
-]);
-
-function isAdminHost(req) {
-  const host = (req.headers.host || '').split(':')[0].toLowerCase();
-  return ADMIN_HOSTS.has(host);
-}
+// Host routing: admin → admin SPA; studio/apex → phone shell (see lib/urls.js)
 
 const jsonParser = express.json({ limit: '2mb' });
+const rawParser = express.raw({ type: 'application/json', limit: '2mb' });
 app.use((req, res, next) => {
-  // Odysseus proxy must stream POST bodies; global json() consumes them first.
   if (req.path === CHAT_PREFIX || req.path.startsWith(`${CHAT_PREFIX}/`)) {
     return next();
+  }
+  if (req.path === '/api/stripe/webhook') {
+    return rawParser(req, res, next);
   }
   jsonParser(req, res, next);
 });
@@ -74,7 +73,12 @@ app.use('/uploads', express.static(uploadsDir, { maxAge: '7d' }));
 app.get('/api/health', async (_req, res) => {
   try {
     await pool.query('SELECT 1');
-    res.json({ ok: true, admin: isAdminHost(_req) });
+    res.json({
+      ok: true,
+      admin: isAdminHost(_req),
+      studio: isStudioHost(_req),
+      host: (_req.headers.host || '').split(':')[0],
+    });
   } catch (err) {
     console.error('health check failed:', err);
     res.status(503).json({ ok: false, error: 'Database unavailable' });
@@ -90,6 +94,9 @@ app.use('/api/calendar', calendarRoutes);
 app.use('/api/home', homeRoutes);
 app.use('/api/store', storeRoutes);
 app.use('/api/orders', ordersRoutes);
+app.use('/api/inquiry', inquiryRoutes);
+app.use('/api/events', eventsRoutes);
+app.use('/api/stripe', stripeRoutes);
 app.use('/api/admin', adminRoutes);
 
 const odyBridgeScript = readFileSync(resolve(__dirname, 'lib/ody-bridge.js'), 'utf8');
@@ -100,7 +107,7 @@ app.get(`${CHAT_PREFIX}/ody-bridge.js`, (_req, res) => {
 app.use(`${STATIC_PREFIX}`, createOdysseusStaticRoute());
 app.use(`${CHAT_PREFIX}/s`, createOdysseusStaticRoute());
 
-// Odysseus AI workspace — proxied for mobile access at creativebuilds.dev/chat
+// Odysseus AI workspace — proxied at studio.creativebuilds.dev/chat (and legacy apex)
 app.use(CHAT_PREFIX, async (req, res) => {
   try {
     await ensureOdysseusSession(req, res);
@@ -140,6 +147,7 @@ if (existsSync(adminDist)) {
 if (existsSync(distDir)) {
   app.use((req, res, next) => {
     if (isAdminHost(req) && !req.path.startsWith('/api')) return next();
+    if (!isStudioHost(req) && !req.path.startsWith('/api')) return next();
     express.static(distDir, { index: false })(req, res, next);
   });
   app.get('*', (req, res, next) => {
@@ -151,6 +159,9 @@ if (existsSync(distDir)) {
         res.sendFile(resolve(adminDist, 'index.html'));
         return;
       }
+      return next();
+    }
+    if (!isStudioHost(req)) {
       return next();
     }
     res.sendFile(resolve(distDir, 'index.html'));

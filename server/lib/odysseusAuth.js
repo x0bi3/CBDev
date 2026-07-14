@@ -66,6 +66,11 @@ function cookieParts(name, value, maxAge) {
     'SameSite=Lax',
     `Max-Age=${maxAge}`,
   ];
+  if (process.env.COOKIE_DOMAIN) {
+    parts.push(`Domain=${process.env.COOKIE_DOMAIN}`);
+  } else if (process.env.NODE_ENV === 'production') {
+    parts.push('Domain=.creativebuilds.dev');
+  }
   if (secure) parts.push('Secure');
   return parts.join('; ');
 }
@@ -91,6 +96,11 @@ export function clearCbdevTokenCookie(res) {
     'SameSite=Lax',
     'Max-Age=0',
   ];
+  if (process.env.COOKIE_DOMAIN) {
+    parts.push(`Domain=${process.env.COOKIE_DOMAIN}`);
+  } else if (process.env.NODE_ENV === 'production') {
+    parts.push('Domain=.creativebuilds.dev');
+  }
   if (secure) parts.push('Secure');
   res.append('Set-Cookie', parts.join('; '));
 }

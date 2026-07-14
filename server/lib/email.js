@@ -1,11 +1,12 @@
 import https from 'node:https';
+import { URLS } from './urls.js';
 
 function mailFrom() {
   return process.env.NOTIFY_FROM || 'CreativeBuilds <onboarding@resend.dev>';
 }
 
 function adminEmail() {
-  return process.env.NOTIFY_EMAIL || 'hello@creativebuilds.dev';
+  return URLS.contactEmail;
 }
 
 function postResend(apiKey, payload) {
@@ -61,6 +62,58 @@ export async function sendEmail({ to, subject, text, html, replyTo }) {
   }
 }
 
+export async function notifyNewInquiry(inquiry) {
+  const categories = Array.isArray(inquiry.categories)
+    ? inquiry.categories.join(', ')
+    : JSON.stringify(inquiry.categories);
+  const answerLines = Object.entries(inquiry.answers || {}).map(
+    ([k, v]) => `${k}: ${v}`,
+  );
+  return sendEmail({
+    to: adminEmail(),
+    subject: `[Project inquiry] ${inquiry.name}`,
+    text: [
+      `New project inquiry (#${inquiry.id})`,
+      '',
+      `Name: ${inquiry.name}`,
+      `Email: ${inquiry.email}`,
+      inquiry.company ? `Company: ${inquiry.company}` : '',
+      `Categories: ${categories}`,
+      inquiry.budget ? `Budget: ${inquiry.budget}` : '',
+      inquiry.timeline ? `Timeline: ${inquiry.timeline}` : '',
+      '',
+      'Overview:',
+      inquiry.overview,
+      '',
+      ...(answerLines.length ? ['Details:', ...answerLines, ''] : []),
+      `View in admin: ${URLS.admin}`,
+    ].filter(Boolean).join('\n'),
+    replyTo: inquiry.email,
+  });
+}
+
+export async function sendInquiryConfirmation(inquiry) {
+  return sendEmail({
+    to: inquiry.email,
+    subject: 'We got your project inquiry',
+    text: [
+      `Hi ${inquiry.name},`,
+      '',
+      'Thanks for reaching out. I read every inquiry personally and aim to reply within 12 hours on business days.',
+      '',
+      'What you sent:',
+      inquiry.overview,
+      '',
+      'If you need to add anything, reply to this email.',
+      '',
+      'Ryan Baldwin',
+      'CreativeBuilds',
+      URLS.contactEmail,
+    ].join('\n'),
+    replyTo: adminEmail(),
+  });
+}
+
 export async function notifyNewTicket(ticket, message) {
   const name = ticket.contact_name || 'Someone';
   const replyEmail = ticket.contact_email || ticket.email;
@@ -77,7 +130,7 @@ export async function notifyNewTicket(ticket, message) {
       '',
       message,
       '',
-      'View in admin: https://admin.creativebuilds.dev',
+      `View in admin: ${URLS.admin}`,
     ].join('\n'),
     replyTo: replyEmail.includes('@tickets.creativebuilds.dev') ? undefined : replyEmail,
   });
@@ -100,7 +153,7 @@ export async function sendTicketConfirmation(ticket, message) {
       message,
       '',
       '— Ryan · CreativeBuilds',
-      'hello@creativebuilds.dev',
+      URLS.contactEmail,
     ].join('\n'),
     replyTo: adminEmail(),
   });
@@ -116,7 +169,7 @@ export async function sendNewsletterWelcome(email) {
       'You\'ll get occasional notes on what we\'re building — no spam, unsubscribe any time by replying to this email.',
       '',
       '— Ryan · CreativeBuilds',
-      'https://creativebuilds.dev',
+      URLS.studio,
     ].join('\n'),
     replyTo: adminEmail(),
   });

@@ -774,11 +774,80 @@ function TicketsSection() {
   );
 }
 
+function InquiriesSection() {
+  const [rows, setRows] = useState([]);
+  const [detail, setDetail] = useState(null);
+  const load = () => api('/admin/inquiries').then(r => setRows(r.inquiries || []));
+  useEffect(() => { load(); }, []);
+  const open = async (row) => {
+    const r = await api('/admin/inquiries/' + row.id);
+    setDetail(r.inquiry);
+  };
+  const setStatus = async (status) => {
+    await api('/admin/inquiries/' + detail.id, { method: 'PATCH', body: { status } });
+    load();
+    open({ id: detail.id });
+  };
+  const categories = (r) => {
+    try {
+      const c = typeof r.categories === 'string' ? JSON.parse(r.categories) : r.categories;
+      return Array.isArray(c) ? c.join(', ') : String(c || '');
+    } catch { return ''; }
+  };
+  return (
+    <div>
+      <h2 className="text-xl font-semibold text-white">Project inquiries</h2>
+      <p className="mt-1 text-sm text-slate-400">Submitted from www.creativebuilds.dev/inquiry</p>
+      <div className="mt-4 grid gap-6 lg:grid-cols-2">
+        <Table
+          columns={[
+            { key: 'name', label: 'Name' },
+            { key: 'email', label: 'Email' },
+            { key: 'categories', label: 'Categories', render: categories },
+            { key: 'status', label: 'Status' },
+            { key: 'created_at', label: 'When', render: r => new Date(r.created_at).toLocaleString() },
+          ]}
+          rows={rows}
+          onEdit={open}
+          onDelete={async () => {}}
+        />
+        {detail && (
+          <div className="rounded-xl border border-slate-500 bg-slate-800/80 p-4 text-slate-100">
+            <h3 className="font-semibold text-white">#{detail.id} {detail.name}</h3>
+            <dl className="mt-2 grid gap-1 text-sm text-slate-300">
+              <div><span className="text-slate-500">Email:</span> {detail.email}</div>
+              {detail.company && <div><span className="text-slate-500">Company:</span> {detail.company}</div>}
+              <div><span className="text-slate-500">Categories:</span> {categories(detail)}</div>
+              {detail.budget && <div><span className="text-slate-500">Budget:</span> {detail.budget}</div>}
+              {detail.timeline && <div><span className="text-slate-500">Timeline:</span> {detail.timeline}</div>}
+            </dl>
+            <p className="mt-4 whitespace-pre-wrap text-sm">{detail.overview}</p>
+            {detail.answers && Object.keys(typeof detail.answers === 'string' ? JSON.parse(detail.answers) : detail.answers).length > 0 && (
+              <div className="mt-4 rounded-lg bg-slate-900 p-3 text-sm">
+                <p className="text-xs uppercase text-slate-500">Details</p>
+                {Object.entries(typeof detail.answers === 'string' ? JSON.parse(detail.answers) : detail.answers).map(([k, v]) => (
+                  <p key={k} className="mt-2"><span className="text-slate-500">{k}:</span> {v}</p>
+                ))}
+              </div>
+            )}
+            <div className="mt-4 flex flex-wrap gap-2">
+              <select className={inputCls()} value={detail.status} onChange={e => setStatus(e.target.value)}>
+                {['new', 'reviewing', 'replied', 'closed'].map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+              <a className="rounded-lg bg-indigo-600 px-3 py-2 text-sm text-white" href={'mailto:' + detail.email + '?subject=Re: Your CreativeBuilds inquiry'}>Reply by email</a>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function Dashboard({ stats }) {
   if (!stats) return null;
   const cards = [
     ['Products', stats.products], ['Blog posts', stats.blog_posts], ['Portfolio', stats.portfolio],
-    ['Open tickets', stats.open_tickets], ['Upcoming bookings', stats.upcoming_bookings], ['Subscribers', stats.subscribers],
+    ['Open tickets', stats.open_tickets], ['New inquiries', stats.new_inquiries || 0], ['Upcoming bookings', stats.upcoming_bookings], ['Subscribers', stats.subscribers],
   ];
   return (
     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -938,6 +1007,71 @@ function OrdersSection() {
   );
 }
 
+function StripeSection() {
+  const [data, setData] = useState(null);
+  const [subs, setSubs] = useState([]);
+  const load = () => Promise.all([
+    api('/admin/stripe/settings').then(setData),
+    api('/admin/stripe/subscriptions').then(r => setSubs(r.subscriptions)).catch(() => {}),
+  ]);
+  useEffect(() => { load(); }, []);
+  const save = async () => {
+    await api('/admin/stripe/settings', { method: 'PUT', body: data.settings });
+    load();
+  };
+  if (!data) return <p className="text-slate-400">Loading...</p>;
+  return (
+    <div className="space-y-8">
+      <div>
+        <h2 className="text-xl font-semibold">Stripe Configuration</h2>
+        <div className="mt-2 flex gap-3">
+          <span className={'rounded-full px-3 py-1 text-xs font-medium ' + (data.configured ? 'bg-emerald-900 text-emerald-300' : 'bg-rose-900 text-rose-300')}>
+            {data.configured ? 'Secret key configured' : 'No secret key'}
+          </span>
+          <span className={'rounded-full px-3 py-1 text-xs font-medium ' + (data.webhookConfigured ? 'bg-emerald-900 text-emerald-300' : 'bg-amber-900 text-amber-300')}>
+            {data.webhookConfigured ? 'Webhook configured' : 'No webhook secret'}
+          </span>
+        </div>
+      </div>
+      <div className="max-w-xl rounded-xl border border-slate-700 p-4 space-y-3">
+        <Field label="Publishable key">
+          <input className={inputCls()} value={data.settings?.publishable_key || ''} onChange={e => setData({...data, settings: {...data.settings, publishable_key: e.target.value}})} placeholder="pk_live_..." />
+        </Field>
+        <Field label="Blitz Call price (cents)">
+          <input type="number" className={inputCls()} value={data.settings?.blitz_price_cents || 2000} onChange={e => setData({...data, settings: {...data.settings, blitz_price_cents: Number(e.target.value)}})} />
+        </Field>
+        <label className="flex items-center gap-2 text-sm text-slate-300">
+          <input type="checkbox" checked={data.settings?.connect_enabled || false} onChange={e => setData({...data, settings: {...data.settings, connect_enabled: e.target.checked}})} />
+          Connect enabled (for client platform payments)
+        </label>
+        <Btn onClick={save}>Save Stripe settings</Btn>
+      </div>
+      {subs.length > 0 && (
+        <div>
+          <h3 className="font-semibold">Active hosting subscriptions</h3>
+          <Table columns={[
+            {key:'user_email',label:'User'},
+            {key:'tier',label:'Tier',render:r=><span className="capitalize">{r.tier}</span>},
+            {key:'billing_cycle',label:'Cycle'},
+            {key:'status',label:'Status',render:r=><span className={r.status==='active'?'text-emerald-400':'text-slate-400'}>{r.status}</span>},
+            {key:'created_at',label:'Since',render:r=>new Date(r.created_at).toLocaleDateString()},
+          ]} rows={subs} onEdit={()=>{}} onDelete={()=>{}} />
+        </div>
+      )}
+      <div className="rounded-xl border border-slate-600 bg-slate-900/50 p-4 text-sm text-slate-400">
+        <p className="font-medium text-slate-200">Setup checklist</p>
+        <ul className="mt-2 space-y-1 list-disc pl-5">
+          <li>Set STRIPE_SECRET_KEY in server .env</li>
+          <li>Set STRIPE_PUBLISHABLE_KEY in server .env</li>
+          <li>Set STRIPE_WEBHOOK_SECRET in server .env</li>
+          <li>Create webhook endpoint in Stripe Dashboard pointing to https://app.creativebuilds.dev/api/stripe/webhook</li>
+          <li>Subscribe to events: checkout.session.completed, customer.subscription.updated, customer.subscription.deleted</li>
+        </ul>
+      </div>
+    </div>
+  );
+}
+
 const NAV = [
   ['dashboard', 'Dashboard'],
   ['products', 'Products'],
@@ -945,9 +1079,11 @@ const NAV = [
   ['portfolio', 'Portfolio'],
   ['home-apps', 'Home apps'],
   ['calendar', 'Calendar'],
+  ['inquiries', 'Inquiries'],
   ['tickets', 'Tickets'],
   ['orders', 'Orders'],
   ['newsletter', 'Newsletter'],
+  ['stripe', 'Stripe'],
 ];
 
 function AdminApp({ user, onLogout }) {
@@ -964,9 +1100,11 @@ function AdminApp({ user, onLogout }) {
     portfolio: <PortfolioSection />,
     'home-apps': <HomeAppsSection />,
     calendar: <CalendarSection />,
+    inquiries: <InquiriesSection />,
     tickets: <TicketsSection />,
     orders: <OrdersSection />,
     newsletter: <NewsletterSection />,
+    stripe: <StripeSection />,
   };
 
   return (
