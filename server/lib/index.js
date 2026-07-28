@@ -13,8 +13,6 @@ import homeRoutes from './routes/home.js';
 import adminRoutes from './routes/admin.js';
 import { pool } from './db.js';
 import { ensureUploadDirs } from './lib/uploads.js';
-import { startBlogIdeasScheduler } from './lib/blogIdeasScheduler.js';
-import { migrateBlogBodyToHtml } from './lib/blogMigrate.js';
 import { createOdysseusProxy, CHAT_PREFIX, STATIC_PREFIX } from './lib/odysseusProxy.js';
 import { createOdysseusStaticRoute } from './lib/odysseusStatic.js';
 import { ensureOdysseusSession } from './lib/odysseusAuth.js';
@@ -150,10 +148,4 @@ if (existsSync(distDir)) {
 
 app.listen(PORT, async () => {
   console.log(`cbdev-server: listening on http://127.0.0.1:${PORT}`);
-  try {
-    await migrateBlogBodyToHtml();
-  } catch (err) {
-    console.error('blog body migration:', err.message);
-  }
-  startBlogIdeasScheduler();
 });

@@ -13,17 +13,22 @@ import homeRoutes from './routes/home.js';
 import storeRoutes from './routes/store.js';
 import ordersRoutes from './routes/orders.js';
 import inquiryRoutes from './routes/inquiry.js';
+import freeAuditRoutes from './routes/free-audit.js';
 import eventsRoutes from './routes/events.js';
 import stripeRoutes from './routes/stripe.js';
+import quotesRoutes from './routes/quotes.js';
 import adminRoutes from './routes/admin.js';
+import calWebhookRoutes from './routes/webhooks-cal.js';
+import chatRoutes from './routes/chat.js';
+import retellRoutes from './routes/retell.js';
 import { pool } from './db.js';
 import { ensureUploadDirs } from './lib/uploads.js';
-import { startBlogIdeasScheduler } from './lib/blogIdeasScheduler.js';
-import { migrateBlogBodyToHtml } from './lib/blogMigrate.js';
+import { ensureLeadAutomationSchema } from './lib/ensureSchema.js';
 import { createOdysseusProxy, CHAT_PREFIX, STATIC_PREFIX } from './lib/odysseusProxy.js';
 import { createOdysseusStaticRoute } from './lib/odysseusStatic.js';
 import { ensureOdysseusSession } from './lib/odysseusAuth.js';
 import { isAdminHost, isStudioHost } from './lib/urls.js';
+import seoRoutes from './routes/seo.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, '..');
@@ -57,6 +62,51 @@ const PORT = Number(process.env.PORT) || 3020;
 
 // Host routing: admin → admin SPA; studio/apex → phone shell (see lib/urls.js)
 
+const CORS_ORIGINS = new Set([
+  'https://www.creativebuilds.dev',
+  'https://test.creativebuilds.dev',
+  'https://studio.creativebuilds.dev',
+  'https://app.creativebuilds.dev',
+  'https://creativebuilds.dev',
+  'http://127.0.0.1:3011',
+  'http://localhost:3011',
+  'http://127.0.0.1:3004',
+  'http://localhost:3004',
+  'http://127.0.0.1:3012',
+  'http://localhost:3012',
+  'http://127.0.0.1:3001',
+  'http://localhost:3001',
+  'http://127.0.0.1:3000',
+  'http://localhost:3000',
+]);
+
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  if (req.secure || req.headers['x-forwarded-proto'] === 'https') {
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  }
+  next();
+});
+
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin && CORS_ORIGINS.has(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+  }
+  if (req.method === 'OPTIONS' && origin && CORS_ORIGINS.has(origin)) {
+    res.status(204).end();
+    return;
+  }
+  next();
+});
+
 const jsonParser = express.json({ limit: '2mb' });
 const rawParser = express.raw({ type: 'application/json', limit: '2mb' });
 app.use((req, res, next) => {
@@ -89,15 +139,21 @@ app.use('/api/auth', authRoutes);
 app.use('/api/products', productsRoutes);
 app.use('/api/portfolio', portfolioRoutes);
 app.use('/api/blog', blogRoutes);
+app.use('/api/seo', seoRoutes);
 app.use('/api/tickets', ticketsRoutes);
 app.use('/api/calendar', calendarRoutes);
 app.use('/api/home', homeRoutes);
 app.use('/api/store', storeRoutes);
 app.use('/api/orders', ordersRoutes);
 app.use('/api/inquiry', inquiryRoutes);
+app.use('/api/free-audit', freeAuditRoutes);
 app.use('/api/events', eventsRoutes);
 app.use('/api/stripe', stripeRoutes);
+app.use('/api/quotes', quotesRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/webhooks/cal', calWebhookRoutes);
+app.use('/api/chat', chatRoutes);
+app.use('/api/retell', retellRoutes);
 
 const odyBridgeScript = readFileSync(resolve(__dirname, 'lib/ody-bridge.js'), 'utf8');
 app.get(`${CHAT_PREFIX}/ody-bridge.js`, (_req, res) => {
@@ -173,9 +229,8 @@ if (existsSync(distDir)) {
 app.listen(PORT, async () => {
   console.log(`cbdev-server: listening on http://127.0.0.1:${PORT}`);
   try {
-    await migrateBlogBodyToHtml();
+    await ensureLeadAutomationSchema();
   } catch (err) {
-    console.error('blog body migration:', err.message);
+    console.error('lead automation schema:', err.message);
   }
-  startBlogIdeasScheduler();
 });

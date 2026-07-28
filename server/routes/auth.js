@@ -21,6 +21,8 @@ import {
   clearCbdevTokenCookie,
   readCbdevToken,
 } from '../lib/odysseusAuth.js';
+import { sendPasswordResetEmail } from '../lib/email.js';
+import { URLS } from '../lib/urls.js';
 
 const router = Router();
 
@@ -163,8 +165,10 @@ router.post('/reset/request', async (req, res) => {
         `INSERT INTO password_resets (user_id, token_hash, expires_at) VALUES ($1, $2, $3)`,
         [user.id, tokenHash, expiresAt],
       );
-      console.log(`cbdev-server: password reset token for ${email}: ${rawToken}`);
+      const resetUrl = `${(URLS.app || 'https://app.creativebuilds.dev').replace(/\/$/, '')}/onboarding?token=${rawToken}`;
+      await sendPasswordResetEmail(user, resetUrl);
       if (process.env.NODE_ENV !== 'production') {
+        console.log(`cbdev-server: password reset token for ${email} (dev)`);
         res.json({
           ok: true,
           message: 'If an account exists, a reset link is on its way.',
@@ -218,7 +222,11 @@ router.post('/reset/confirm', async (req, res) => {
     );
     if (userRows[0]) await syncUserToOdysseus(userRows[0]);
 
-    res.json({ ok: true, message: 'Password updated. You can sign in now.' });
+    const user = userRows[0] ? userPayload(userRows[0]) : null;
+    const jwt = userRows[0] ? signToken(userRows[0]) : null;
+    if (jwt) setCbdevTokenCookie(res, jwt);
+
+    res.json({ ok: true, message: 'Password updated.', user, token: jwt });
   } catch (err) {
     console.error('auth reset confirm:', err);
     res.status(500).json({ error: 'Password reset failed' });

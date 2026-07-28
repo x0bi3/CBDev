@@ -71,27 +71,6 @@ INSERT INTO portfolio_projects (slug, name, tag, color, role, year, stack, summa
    'A boutique creative agency site with kinetic typography and a magnetic cursor.',
    '["Awwwards Honourable Mention","100/100 Lighthouse","Bespoke shader gallery"]'::jsonb, 4);
 
-INSERT INTO blog_posts (slug, title, excerpt, body, read_time, status, published_at) VALUES
-  ('shipping-lighthouse-100-react', 'Shipping a Lighthouse-100 React app in 2025',
-   'A field guide to the boring wins that compound: bundle splitting, image strategy, and the unsexy CDN settings that move the needle.',
-   '["Performance work isn''t a single hero pull-request. It''s a hundred small decisions made consistently across a codebase, and the discipline to revisit them every release.","In this post we walk through the audit we run on every project: opening DevTools, recording a 6× CPU throttled trace, identifying the long tasks, and breaking them apart with route-level code splitting.","We''ll also cover the often-overlooked CDN settings (stale-while-revalidate, immutable assets, brotli compression) that make repeat visits feel instant.","Finally: how to wire all of this into CI so regressions never reach production."]'::jsonb,
-   '8 min', 'published', '2025-11-04T12:00:00Z'),
-  ('glsl-for-designers', 'GLSL for designers: a gentle on-ramp',
-   'You don''t need a CS degree to write your first fragment shader. Start with color, then noise, then displacement.',
-   '["Shaders are intimidating because the syntax is unfamiliar and the feedback loop feels alien. There is no console.log, just pixels.","But fragment shaders are really just a function: for every pixel on screen, return a color. Once you internalize that, the rest is just math.","We start with constants, move to UVs, then introduce time. By the end of part one you''ll have a gradient that pulses."]'::jsonb,
-   '12 min', 'published', '2025-10-18T12:00:00Z'),
-  ('choreographing-scroll-gsap-lenis', 'Choreographing scroll with GSAP & Lenis',
-   'Smooth scroll gets a bad rap. Done well, it''s the difference between a website and an experience.',
-   '["Smooth scroll has earned its reputation. Most implementations fight the browser, break find-on-page, and add jank on low-end devices.","Lenis sidesteps most of these issues by piggy-backing on the native scroll position. Combined with GSAP ScrollTrigger, you get buttery transitions without fighting the platform."]'::jsonb,
-   '6 min', 'published', '2025-09-27T12:00:00Z'),
-  ('design-tokens-that-scale', 'Design tokens that actually scale',
-   'Most token systems collapse under their own weight. Here''s how to design one that survives three product redesigns.',
-   '["The first token system you build is almost always too granular. The second is too coarse. The third one, finally, fits.","In this post we share the three-tier token taxonomy we''ve standardised on: primitives, semantic, and component."]'::jsonb,
-   '9 min', 'published', '2025-08-12T12:00:00Z');
+-- Blog seed removed (Content Engine replaces SEO content). blog_posts table may remain empty.
 
-INSERT INTO support_tickets (user_id, email, subject, category, priority, status, client_id, contact_pref, contact_email) VALUES
-  (1, 'demo@creativebuilds.dev', 'Sample: deployment pipeline question', 'Technical', 'Normal', 'open', 'CB-04821', 'Email', 'demo@creativebuilds.dev');
-
-INSERT INTO ticket_messages (ticket_id, sender, body) VALUES
-  (1, 'user', 'Hi — I need help wiring our staging deploy to run after PR merge. Can you point me at the right docs?'),
-  (1, 'staff', 'Thanks for reaching out! We''ll review your pipeline config and follow up within 24 hours with next steps.');
+-- Sample support ticket removed — use wipe script 027 for leftover demos.

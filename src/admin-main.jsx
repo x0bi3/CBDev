@@ -1,7 +1,8 @@
 import './admin.css';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
-import { BlogEditor } from './components/admin/BlogEditor.jsx';
+import { QuotesSection } from './components/admin/QuotesSection.jsx';
+import { ContentEngineSection } from './components/admin/ContentEngine.jsx';
 
 const TOKEN_KEY = 'cb-admin-token';
 
@@ -57,20 +58,24 @@ function Btn({ children, onClick, variant = 'primary', className = '' }) {
 
 function Table({ columns, rows, onEdit, onDelete, onView, extraActions }) {
   return (
-    <div className="overflow-x-auto rounded-xl border border-slate-700">
-      <table className="w-full text-left text-sm">
+    <div className="w-full min-w-0 overflow-x-auto rounded-xl border border-slate-700">
+      <table className="w-full min-w-[720px] text-left text-sm">
         <thead className="bg-slate-800/80 text-xs uppercase text-slate-400">
-          <tr>{columns.map(c => <th key={c.key} className="px-4 py-3">{c.label}</th>)}<th className="px-4 py-3">Actions</th></tr>
+          <tr>{columns.map(c => <th key={c.key} className="whitespace-nowrap px-4 py-3.5">{c.label}</th>)}<th className="whitespace-nowrap px-4 py-3.5">Actions</th></tr>
         </thead>
         <tbody>
           {rows.map(row => (
-            <tr key={row.id || row.slug || row.app_id} className="border-t border-slate-700/80 hover:bg-slate-800/40">
-              {columns.map(c => <td key={c.key} className="max-w-xs truncate px-4 py-2.5">{c.render ? c.render(row) : row[c.key]}</td>)}
-              <td className="px-4 py-2.5 whitespace-nowrap">
+            <tr key={row.id || row.slug || row.app_id || row.path} className="border-t border-slate-700/80 hover:bg-slate-800/40">
+              {columns.map(c => (
+                <td key={c.key} className={'px-4 py-3 ' + (c.wrap ? '' : 'whitespace-nowrap')}>
+                  {c.render ? c.render(row) : row[c.key]}
+                </td>
+              ))}
+              <td className="px-4 py-3 whitespace-nowrap">
                 {onView && <Btn variant="ghost" onClick={() => onView(row)}>View</Btn>}
                 {extraActions?.(row)}
-                <Btn variant="ghost" className={onView || extraActions ? 'ml-2' : ''} onClick={() => onEdit(row)}>Edit</Btn>
-                <Btn variant="danger" className="ml-2" onClick={() => onDelete(row)}>Delete</Btn>
+                {onEdit && <Btn variant="ghost" className={onView || extraActions ? 'ml-2' : ''} onClick={() => onEdit(row)}>Edit</Btn>}
+                {onDelete && <Btn variant="danger" className="ml-2" onClick={() => onDelete(row)}>Delete</Btn>}
               </td>
             </tr>
           ))}
@@ -356,109 +361,6 @@ function ProductsSection() {
   );
 }
 
-function BlogPostPreview({ post, onClose }) {
-  const date = post.published_at
-    ? new Date(post.published_at).toLocaleDateString()
-    : 'Unpublished draft';
-  const html = post.body_html || '';
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4" onClick={onClose}>
-      <div
-        className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-slate-600 bg-[#0a0a0f] p-6 text-slate-100 shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="mb-4 flex items-center justify-between gap-3">
-          <span className="text-xs uppercase tracking-wider text-slate-400">Public preview</span>
-          <Btn variant="ghost" onClick={onClose}>Close</Btn>
-        </div>
-        <article>
-          <p className="text-[11px] uppercase tracking-wider text-slate-500">
-            {date} · {post.read_time || '5 min'}
-          </p>
-          <h1 className="mt-2 text-[28px] font-bold leading-tight text-white">{post.title || 'Untitled'}</h1>
-          {post.excerpt && (
-            <p className="mt-3 text-[15px] italic leading-relaxed text-slate-400">{post.excerpt}</p>
-          )}
-          <div
-            className="blog-article-body mt-6 text-[15px] leading-relaxed text-slate-200"
-            dangerouslySetInnerHTML={{ __html: html || '<p class=\"text-slate-500\">No body content yet.</p>' }}
-          />
-          {post.status === 'draft' && (
-            <p className="mt-6 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
-              Draft preview — not visible on the public site until published.
-            </p>
-          )}
-        </article>
-      </div>
-    </div>
-  );
-}
-
-function BlogSection() {
-  const [rows, setRows] = useState([]);
-  const [editorPost, setEditorPost] = useState(undefined);
-  const [preview, setPreview] = useState(null);
-
-  const load = () => api('/admin/blog').then((r) => setRows(r.posts));
-
-  useEffect(() => { load(); }, []);
-
-  const publish = async (row) => {
-    if (!confirm(`Publish "${row.title}"?`)) return;
-    await api('/admin/blog/' + row.id + '/publish', { method: 'POST' });
-    load();
-  };
-
-  const handleSave = async (data) => {
-    if (data.id) {
-      await api('/admin/blog/' + data.id, { method: 'PUT', body: data });
-    } else {
-      await api('/admin/blog', { method: 'POST', body: data });
-    }
-    setEditorPost(undefined);
-    load();
-  };
-
-  if (editorPost !== undefined) {
-    return (
-      <BlogEditor
-        post={editorPost}
-        api={api}
-        onBack={() => setEditorPost(undefined)}
-        onSave={handleSave}
-      />
-    );
-  }
-
-  return (
-    <div>
-      <div className="mb-4 flex justify-between">
-        <div>
-          <h2 className="text-xl font-semibold">Blog</h2>
-          <p className="mt-1 text-sm text-slate-400">AI-powered writing studio with recommended topic ideas.</p>
-        </div>
-        <Btn onClick={() => setEditorPost(null)}>Create post</Btn>
-      </div>
-      <Table
-        columns={[
-          { key: 'title', label: 'Title' },
-          { key: 'status', label: 'Status' },
-          { key: 'published_at', label: 'Published', render: (r) => r.published_at ? new Date(r.published_at).toLocaleDateString() : '—' },
-        ]}
-        rows={rows}
-        onView={(r) => setPreview(r)}
-        extraActions={(r) => r.status === 'draft' ? (
-          <Btn className="ml-2" onClick={() => publish(r)}>Publish</Btn>
-        ) : null}
-        onEdit={(r) => setEditorPost(r)}
-        onDelete={async (r) => { if (confirm('Delete?')) { await api('/admin/blog/' + r.id, { method: 'DELETE' }); load(); } }}
-      />
-      {preview && <BlogPostPreview post={preview} onClose={() => setPreview(null)} />}
-    </div>
-  );
-}
-
 function PortfolioSection() {
   const [rows, setRows] = useState([]);
   const [edit, setEdit] = useState(null);
@@ -664,44 +566,339 @@ function HomeAppsSection() {
   );
 }
 
+const CAL_TZ = 'America/Chicago';
+
+function calDayKey(iso) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: CAL_TZ,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date(iso));
+}
+
+function calMonthLabel(year, monthIndex) {
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: CAL_TZ,
+    month: 'long',
+    year: 'numeric',
+  }).format(new Date(Date.UTC(year, monthIndex, 15, 12)));
+}
+
+function calTimeLabel(iso) {
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: CAL_TZ,
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(new Date(iso));
+}
+
+function calStatusCls(status) {
+  const s = String(status || '').toLowerCase();
+  if (s === 'cancelled' || s === 'rejected') return 'bg-rose-500/20 text-rose-300';
+  if (s === 'pending' || s === 'awaiting_host') return 'bg-amber-500/20 text-amber-200';
+  if (s === 'accepted') return 'bg-emerald-500/20 text-emerald-200';
+  return 'bg-slate-600/40 text-slate-300';
+}
+
 function CalendarSection() {
-  const [settings, setSettings] = useState(null);
-  const [types, setTypes] = useState([]);
+  const now = new Date();
+  const [cursor, setCursor] = useState({ y: now.getFullYear(), m: now.getMonth() });
+  const [summary, setSummary] = useState(null);
   const [bookings, setBookings] = useState([]);
-  const load = () => Promise.all([
-    api('/admin/calendar/settings').then(r => setSettings(r.settings)),
-    api('/admin/calendar/types').then(r => setTypes(r.types)),
-    api('/admin/calendar/bookings').then(r => setBookings(r.bookings)),
-  ]);
-  useEffect(() => { load(); }, []);
-  const saveSettings = async () => {
-    await api('/admin/calendar/settings', { method: 'PUT', body: settings });
-    load();
+  const [selectedDay, setSelectedDay] = useState(null);
+  const [selected, setSelected] = useState(null);
+  const [err, setErr] = useState('');
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setErr('');
+    try {
+      const from = new Date(Date.UTC(cursor.y, cursor.m - 1, 1)).toISOString();
+      const to = new Date(Date.UTC(cursor.y, cursor.m + 2, 1)).toISOString();
+      const [sum, book] = await Promise.all([
+        api('/admin/calendar/summary'),
+        api(`/admin/calendar/bookings?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`),
+      ]);
+      setSummary(sum);
+      setBookings(book.bookings || []);
+      if (sum.configured === false) setErr(sum.error || 'Cal.diy is not configured on this host');
+    } catch (ex) {
+      setErr(ex.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [cursor.y, cursor.m]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const byDay = bookings.reduce((acc, b) => {
+    const key = calDayKey(b.start);
+    (acc[key] ||= []).push(b);
+    return acc;
+  }, {});
+
+  const first = new Date(cursor.y, cursor.m, 1);
+  const startPad = (first.getDay() + 6) % 7; // Monday-first
+  const daysInMonth = new Date(cursor.y, cursor.m + 1, 0).getDate();
+  const cells = [];
+  for (let i = 0; i < startPad; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+  while (cells.length % 7) cells.push(null);
+
+  const dayKeyFor = (d) => {
+    const mm = String(cursor.m + 1).padStart(2, '0');
+    const dd = String(d).padStart(2, '0');
+    return `${cursor.y}-${mm}-${dd}`;
   };
-  if (!settings) return <p className="text-slate-400">Loading…</p>;
+
+  const agendaDay = selectedDay || calDayKey(now.toISOString());
+  const agenda = (byDay[agendaDay] || []).slice().sort((a, b) => new Date(a.start) - new Date(b.start));
+  const upcoming = bookings
+    .filter((b) => new Date(b.end) >= now && !['cancelled', 'rejected'].includes(String(b.status).toLowerCase()))
+    .sort((a, b) => new Date(a.start) - new Date(b.start))
+    .slice(0, 12);
+  const manage = summary?.manage || {};
+
   return (
-    <div className="space-y-8">
-      <div>
-        <h2 className="text-xl font-semibold">Calendar availability</h2>
-        <div className="mt-4 grid max-w-xl gap-3 rounded-xl border border-slate-700 p-4">
-          <Field label="Timezone"><input className={inputCls()} value={settings.timezone} onChange={e=>setSettings({...settings,timezone:e.target.value})} /></Field>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Weekday start"><input type="time" className={inputCls()} value={settings.weekday_start?.slice(0,5)} onChange={e=>setSettings({...settings,weekday_start:e.target.value})} /></Field>
-            <Field label="Weekday end"><input type="time" className={inputCls()} value={settings.weekday_end?.slice(0,5)} onChange={e=>setSettings({...settings,weekday_end:e.target.value})} /></Field>
-          </div>
-          <Field label="Slot interval (minutes)"><input type="number" className={inputCls()} value={settings.slot_interval_minutes} onChange={e=>setSettings({...settings,slot_interval_minutes:Number(e.target.value)})} /></Field>
-          <Field label="Work weekdays (1=Mon … 7=Sun, comma-separated)"><input className={inputCls()} value={(settings.work_weekdays||[]).join(',')} onChange={e=>setSettings({...settings,work_weekdays:e.target.value.split(',').map(Number).filter(Boolean)})} /></Field>
-          <Field label="Blocked dates (YYYY-MM-DD, comma-separated)"><input className={inputCls()} value={(settings.blocked_dates||[]).join(',')} onChange={e=>setSettings({...settings,blocked_dates:e.target.value.split(',').map(s=>s.trim()).filter(Boolean)})} /></Field>
-          <Btn onClick={saveSettings}>Save availability</Btn>
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-xl font-semibold">Calendar</h2>
+          <p className="mt-1 text-sm text-slate-400">
+            Live Cal.diy bookings ({CAL_TZ}). Manage availability and event types in Cal.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Btn variant="ghost" onClick={load}>Refresh</Btn>
+          {manage.bookings && (
+            <a href={manage.bookings} target="_blank" rel="noopener noreferrer">
+              <Btn>Open Cal.diy</Btn>
+            </a>
+          )}
         </div>
       </div>
-      <div>
-        <h3 className="font-semibold">Meeting types</h3>
-        <Table columns={[{key:'label',label:'Label'},{key:'slug',label:'Slug'},{key:'duration_minutes',label:'Minutes'}]} rows={types} onEdit={()=>{}} onDelete={async r=>{if(confirm('Delete type?')){await api('/admin/calendar/types/'+r.slug,{method:'DELETE'});load();}}} />
+
+      {err && (
+        <div className="rounded-xl border border-rose-700/60 bg-rose-950/40 px-4 py-3 text-sm text-rose-200">
+          {err}
+        </div>
+      )}
+
+      <div className="grid gap-3 sm:grid-cols-3">
+        <div className="rounded-xl border border-slate-700 bg-slate-900/50 p-4">
+          <p className="text-xs uppercase tracking-wide text-slate-500">Upcoming</p>
+          <p className="mt-1 text-2xl font-semibold">{summary?.counts?.upcoming ?? '—'}</p>
+        </div>
+        <div className="rounded-xl border border-slate-700 bg-slate-900/50 p-4">
+          <p className="text-xs uppercase tracking-wide text-slate-500">This month</p>
+          <p className="mt-1 text-2xl font-semibold">{summary?.counts?.thisMonth ?? '—'}</p>
+        </div>
+        <div className="rounded-xl border border-slate-700 bg-slate-900/50 p-4">
+          <p className="text-xs uppercase tracking-wide text-slate-500">Public event types</p>
+          <p className="mt-1 text-2xl font-semibold">{summary?.counts?.eventTypes ?? '—'}</p>
+        </div>
       </div>
-      <div>
-        <h3 className="font-semibold">Bookings</h3>
-        <Table columns={[{key:'user_email',label:'User'},{key:'type_label',label:'Type'},{key:'starts_at',label:'When',render:r=>new Date(r.starts_at).toLocaleString()},{key:'status',label:'Status'}]} rows={bookings} onEdit={()=>{}} onDelete={async r=>{await api('/admin/calendar/bookings/'+r.id,{method:'DELETE'});load();}} />
+
+      <div className="flex flex-wrap gap-2">
+        {[
+          ['Bookings', manage.bookings],
+          ['Event types', manage.eventTypes],
+          ['Availability', manage.availability],
+          ['Public profile', manage.publicProfile],
+          ['Intro call', manage.introCall],
+          ['Blitz call', manage.blitzCall],
+        ].filter(([, href]) => href).map(([label, href]) => (
+          <a key={label} href={href} target="_blank" rel="noopener noreferrer"
+            className="rounded-lg border border-slate-600 px-3 py-1.5 text-sm text-slate-200 hover:bg-slate-800">
+            {label} ↗
+          </a>
+        ))}
+      </div>
+
+      <div className="grid gap-6 xl:grid-cols-[1.4fr_1fr]">
+        <div className="rounded-xl border border-slate-700 p-4">
+          <div className="mb-4 flex items-center justify-between gap-2">
+            <Btn variant="ghost" onClick={() => setCursor((c) => {
+              const m = c.m - 1;
+              return m < 0 ? { y: c.y - 1, m: 11 } : { y: c.y, m };
+            })}>←</Btn>
+            <h3 className="text-lg font-semibold">{calMonthLabel(cursor.y, cursor.m)}</h3>
+            <Btn variant="ghost" onClick={() => setCursor((c) => {
+              const m = c.m + 1;
+              return m > 11 ? { y: c.y + 1, m: 0 } : { y: c.y, m };
+            })}>→</Btn>
+          </div>
+          <div className="grid grid-cols-7 gap-1 text-center text-xs uppercase text-slate-500">
+            {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => (
+              <div key={d} className="py-1">{d}</div>
+            ))}
+          </div>
+          <div className="mt-1 grid grid-cols-7 gap-1">
+            {cells.map((d, idx) => {
+              if (!d) return <div key={`e-${idx}`} className="min-h-[4.5rem] rounded-lg bg-slate-950/40" />;
+              const key = dayKeyFor(d);
+              const dayBookings = byDay[key] || [];
+              const isSelected = agendaDay === key;
+              const isToday = key === calDayKey(now.toISOString());
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => { setSelectedDay(key); setSelected(dayBookings[0] || null); }}
+                  className={
+                    'min-h-[4.5rem] rounded-lg border p-1.5 text-left transition ' +
+                    (isSelected
+                      ? 'border-indigo-500 bg-indigo-950/40'
+                      : 'border-slate-700/80 bg-slate-900/40 hover:border-slate-500') +
+                    (isToday ? ' ring-1 ring-indigo-400/50' : '')
+                  }
+                >
+                  <div className="text-xs font-medium text-slate-300">{d}</div>
+                  <div className="mt-1 space-y-0.5">
+                    {dayBookings.slice(0, 3).map((b) => (
+                      <div key={b.uid} className="truncate rounded bg-indigo-600/30 px-1 py-0.5 text-[10px] text-indigo-100">
+                        {calTimeLabel(b.start)} {b.eventTypeTitle || b.title}
+                      </div>
+                    ))}
+                    {dayBookings.length > 3 && (
+                      <div className="text-[10px] text-slate-500">+{dayBookings.length - 3} more</div>
+                    )}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+          {loading && <p className="mt-3 text-sm text-slate-500">Loading Cal.diy…</p>}
+        </div>
+
+        <div className="space-y-4">
+          <div className="rounded-xl border border-slate-700 p-4">
+            <h3 className="font-semibold">Day agenda — {agendaDay}</h3>
+            {agenda.length === 0 ? (
+              <p className="mt-3 text-sm text-slate-500">No bookings this day.</p>
+            ) : (
+              <ul className="mt-3 space-y-2">
+                {agenda.map((b) => (
+                  <li key={b.uid}>
+                    <button
+                      type="button"
+                      onClick={() => setSelected(b)}
+                      className={
+                        'w-full rounded-lg border px-3 py-2 text-left text-sm transition ' +
+                        (selected?.uid === b.uid
+                          ? 'border-indigo-500 bg-indigo-950/30'
+                          : 'border-slate-700 hover:bg-slate-800/60')
+                      }
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-medium">{calTimeLabel(b.start)} – {calTimeLabel(b.end)}</span>
+                        <span className={'rounded px-1.5 py-0.5 text-[10px] uppercase ' + calStatusCls(b.status)}>
+                          {b.status}
+                        </span>
+                      </div>
+                      <div className="mt-0.5 truncate text-slate-300">{b.eventTypeTitle || b.title}</div>
+                      <div className="truncate text-xs text-slate-500">
+                        {(b.attendees || []).map((a) => a.email || a.name).filter(Boolean).join(', ') || 'No attendee'}
+                      </div>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          <div className="rounded-xl border border-slate-700 p-4">
+            <h3 className="font-semibold">Upcoming</h3>
+            {upcoming.length === 0 ? (
+              <p className="mt-3 text-sm text-slate-500">Nothing upcoming in this window.</p>
+            ) : (
+              <ul className="mt-3 space-y-2 text-sm">
+                {upcoming.map((b) => (
+                  <li key={b.uid} className="flex items-start justify-between gap-2 border-t border-slate-800 pt-2 first:border-0 first:pt-0">
+                    <button type="button" className="text-left hover:text-indigo-300" onClick={() => {
+                      setSelectedDay(calDayKey(b.start));
+                      setSelected(b);
+                    }}>
+                      <div className="font-medium">{b.eventTypeTitle || b.title}</div>
+                      <div className="text-xs text-slate-500">
+                        {new Date(b.start).toLocaleString('en-US', { timeZone: CAL_TZ })}
+                      </div>
+                    </button>
+                    <span className={'shrink-0 rounded px-1.5 py-0.5 text-[10px] uppercase ' + calStatusCls(b.status)}>
+                      {b.status}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          {selected && (
+            <div className="rounded-xl border border-indigo-700/50 bg-indigo-950/20 p-4">
+              <h3 className="font-semibold">Booking detail</h3>
+              <dl className="mt-3 space-y-2 text-sm">
+                <div><dt className="text-slate-500">Title</dt><dd>{selected.title}</dd></div>
+                <div><dt className="text-slate-500">When</dt>
+                  <dd>{new Date(selected.start).toLocaleString('en-US', { timeZone: CAL_TZ })} → {calTimeLabel(selected.end)} CT</dd>
+                </div>
+                <div><dt className="text-slate-500">Attendees</dt>
+                  <dd>{(selected.attendees || []).map((a) => `${a.name || 'Guest'} <${a.email}>`).join(', ') || '—'}</dd>
+                </div>
+                {selected.location && <div><dt className="text-slate-500">Location</dt><dd className="break-all">{selected.location}</dd></div>}
+                {selected.description && <div><dt className="text-slate-500">Notes</dt><dd className="whitespace-pre-wrap text-slate-300">{selected.description}</dd></div>}
+              </dl>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <a href={selected.links.booking} target="_blank" rel="noopener noreferrer"><Btn>Open in Cal</Btn></a>
+                <a href={selected.links.reschedule} target="_blank" rel="noopener noreferrer"><Btn variant="ghost">Reschedule</Btn></a>
+                <a href={selected.links.cancel} target="_blank" rel="noopener noreferrer"><Btn variant="danger">Cancel</Btn></a>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-slate-700 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 className="font-semibold">Event types</h3>
+          {manage.eventTypes && (
+            <a href={manage.eventTypes} target="_blank" rel="noopener noreferrer" className="text-sm text-indigo-300 hover:underline">
+              Manage in Cal.diy ↗
+            </a>
+          )}
+        </div>
+        <div className="mt-3 overflow-x-auto">
+          <table className="w-full text-left text-sm">
+            <thead className="text-xs uppercase text-slate-500">
+              <tr>
+                <th className="px-2 py-2">Title</th>
+                <th className="px-2 py-2">Slug</th>
+                <th className="px-2 py-2">Minutes</th>
+                <th className="px-2 py-2">Visibility</th>
+                <th className="px-2 py-2">Link</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(summary?.eventTypes || []).map((et) => (
+                <tr key={et.id} className="border-t border-slate-800">
+                  <td className="px-2 py-2">{et.title}</td>
+                  <td className="px-2 py-2 font-mono text-xs text-slate-400">{et.slug}</td>
+                  <td className="px-2 py-2">{et.lengthMinutes}</td>
+                  <td className="px-2 py-2">{et.hidden ? 'Hidden' : 'Public'}</td>
+                  <td className="px-2 py-2">
+                    <a href={et.publicUrl} target="_blank" rel="noopener noreferrer" className="text-indigo-300 hover:underline">
+                      Open ↗
+                    </a>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {!summary?.eventTypes?.length && !loading && (
+            <p className="mt-2 text-sm text-slate-500">No event types found in Cal.diy.</p>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -724,11 +921,12 @@ function TicketsSection() {
     setReply('');
   };
   return (
-    <div>
-      <h2 className="text-xl font-semibold text-white">Support tickets</h2>
-      <p className="mt-1 text-sm text-slate-400">Submitted from the Support app on the main site.</p>
-      <div className="mt-4 grid gap-6 lg:grid-cols-2">
-        <Table
+    <div className="min-w-0 space-y-6">
+      <div>
+        <h2 className="text-xl font-semibold text-white">Support tickets</h2>
+        <p className="mt-1 text-sm text-slate-400">Submitted from the Support app on the main site.</p>
+      </div>
+      <Table
           columns={[
             { key: 'subject', label: 'Subject' },
             { key: 'contact_name', label: 'Name', render: r => r.contact_name || r.user_name || '—' },
@@ -769,7 +967,213 @@ function TicketsSection() {
             </div>
           </div>
         )}
+    </div>
+  );
+}
+
+function LiveChatSection({ initialThreadId, onThreadOpened }) {
+  const [filter, setFilter] = useState('all');
+  const [rows, setRows] = useState([]);
+  const [detail, setDetail] = useState(null);
+  const [reply, setReply] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const load = () => {
+    const q = filter === 'all' ? '' : `?status=${encodeURIComponent(filter)}`;
+    return api('/admin/chat/threads' + q).then((r) => setRows(r.threads || []));
+  };
+
+  useEffect(() => {
+    load();
+  }, [filter]);
+
+  const open = async (t) => {
+    const r = await api('/admin/chat/threads/' + (t.id || t));
+    setDetail(r);
+    setReply('');
+    onThreadOpened?.();
+  };
+
+  useEffect(() => {
+    if (initialThreadId) open(initialThreadId);
+  }, [initialThreadId]);
+
+  useEffect(() => {
+    if (!detail?.thread?.id) return;
+    const id = setInterval(() => {
+      api('/admin/chat/threads/' + detail.thread.id)
+        .then((r) => setDetail(r))
+        .catch(() => {});
+    }, 2500);
+    return () => clearInterval(id);
+  }, [detail?.thread?.id]);
+
+  const accept = async () => {
+    setBusy(true);
+    try {
+      const r = await api('/admin/chat/threads/' + detail.thread.id + '/accept', { method: 'POST' });
+      setDetail(r);
+      load();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const release = async () => {
+    setBusy(true);
+    try {
+      const r = await api('/admin/chat/threads/' + detail.thread.id + '/release', { method: 'POST' });
+      setDetail(r);
+      load();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const close = async () => {
+    setBusy(true);
+    try {
+      const r = await api('/admin/chat/threads/' + detail.thread.id + '/close', { method: 'POST' });
+      setDetail(r);
+      load();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const sendReply = async () => {
+    if (!reply.trim()) return;
+    setBusy(true);
+    try {
+      const r = await api('/admin/chat/threads/' + detail.thread.id + '/messages', {
+        method: 'POST',
+        body: { body: reply },
+      });
+      setDetail(r);
+      setReply('');
+      load();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const statusBadge = (s) => {
+    const colors = {
+      awaiting_ryan: 'text-amber-300',
+      live: 'text-emerald-300',
+      bot: 'text-slate-400',
+      closed: 'text-slate-500',
+    };
+    return <span className={colors[s] || 'text-slate-400'}>{s}</span>;
+  };
+
+  const msgClass = (role) => {
+    if (role === 'ryan') return 'bg-emerald-900/50';
+    if (role === 'miranda') return 'bg-indigo-900/40';
+    if (role === 'system') return 'bg-slate-800 italic text-slate-400';
+    return 'bg-slate-900';
+  };
+
+  return (
+    <div className="min-w-0 space-y-6">
+      <div>
+        <h2 className="text-xl font-semibold text-white">Live Chat</h2>
+        <p className="mt-1 text-sm text-slate-400">
+          Miranda handoffs from the marketing site — accept to take over the conversation.
+        </p>
       </div>
+      <div className="flex flex-wrap gap-2">
+        {['all', 'awaiting_ryan', 'live', 'bot', 'closed'].map((s) => (
+          <button
+            key={s}
+            type="button"
+            onClick={() => setFilter(s)}
+            className={
+              'rounded-lg px-3 py-1.5 text-sm min-h-10 ' +
+              (filter === s ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700')
+            }
+          >
+            {s === 'all' ? 'All' : s.replace('_', ' ')}
+          </button>
+        ))}
+      </div>
+      <Table
+        columns={[
+          { key: 'title', label: 'Title' },
+          { key: 'status', label: 'Status', render: (r) => statusBadge(r.status) },
+          { key: 'visitor_name', label: 'Name', render: (r) => r.visitorName || '—' },
+          { key: 'last_preview', label: 'Last message', render: (r) => (r.lastPreview || '').slice(0, 80) },
+          {
+            key: 'last_message_at',
+            label: 'Updated',
+            render: (r) => (r.lastMessageAt ? new Date(r.lastMessageAt).toLocaleString() : '—'),
+          },
+        ]}
+        rows={rows}
+        onEdit={open}
+        onDelete={async () => {}}
+      />
+      {detail && (
+        <div className="rounded-xl border border-slate-500 bg-slate-800/80 p-4 text-slate-100">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 className="font-semibold text-white">{detail.thread.title || 'Conversation'}</h3>
+              <p className="mt-1 text-sm text-slate-400">
+                Status: {statusBadge(detail.thread.status)}
+                {detail.thread.visitorEmail ? ` · ${detail.thread.visitorEmail}` : ''}
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {detail.thread.status === 'awaiting_ryan' ? (
+                <Btn onClick={accept} disabled={busy}>
+                  Accept live chat
+                </Btn>
+              ) : null}
+              {detail.thread.status === 'live' ? (
+                <>
+                  <Btn onClick={release} disabled={busy}>
+                    Return to Miranda
+                  </Btn>
+                  <Btn onClick={close} disabled={busy}>
+                    Close
+                  </Btn>
+                </>
+              ) : null}
+              {detail.thread.status !== 'closed' && detail.thread.status !== 'live' && detail.thread.status !== 'awaiting_ryan' ? (
+                <Btn onClick={close} disabled={busy}>
+                  Close
+                </Btn>
+              ) : null}
+            </div>
+          </div>
+          <div className="mt-4 max-h-80 space-y-2 overflow-y-auto">
+            {(detail.messages || []).map((m) => (
+              <div key={m.id} className={'rounded-lg px-3 py-2 text-sm ' + msgClass(m.role)}>
+                <span className="text-xs text-slate-400">
+                  {m.role} · {new Date(m.createdAt).toLocaleString()}
+                </span>
+                <p className="mt-1 whitespace-pre-wrap">{m.body}</p>
+              </div>
+            ))}
+          </div>
+          {detail.thread.status === 'live' ? (
+            <>
+              <textarea
+                className={inputCls() + ' mt-3'}
+                rows={3}
+                placeholder="Reply as Ryan…"
+                value={reply}
+                onChange={(e) => setReply(e.target.value)}
+              />
+              <Btn className="mt-2" onClick={sendReply} disabled={busy || !reply.trim()}>
+                Send reply
+              </Btn>
+            </>
+          ) : detail.thread.status === 'awaiting_ryan' ? (
+            <p className="mt-3 text-sm text-amber-200">Visitor is waiting — accept to join.</p>
+          ) : null}
+        </div>
+      )}
     </div>
   );
 }
@@ -795,50 +1199,52 @@ function InquiriesSection() {
     } catch { return ''; }
   };
   return (
-    <div>
-      <h2 className="text-xl font-semibold text-white">Project inquiries</h2>
-      <p className="mt-1 text-sm text-slate-400">Submitted from www.creativebuilds.dev/inquiry</p>
-      <div className="mt-4 grid gap-6 lg:grid-cols-2">
-        <Table
-          columns={[
-            { key: 'name', label: 'Name' },
-            { key: 'email', label: 'Email' },
-            { key: 'categories', label: 'Categories', render: categories },
-            { key: 'status', label: 'Status' },
-            { key: 'created_at', label: 'When', render: r => new Date(r.created_at).toLocaleString() },
-          ]}
-          rows={rows}
-          onEdit={open}
-          onDelete={async () => {}}
-        />
-        {detail && (
-          <div className="rounded-xl border border-slate-500 bg-slate-800/80 p-4 text-slate-100">
-            <h3 className="font-semibold text-white">#{detail.id} {detail.name}</h3>
-            <dl className="mt-2 grid gap-1 text-sm text-slate-300">
-              <div><span className="text-slate-500">Email:</span> {detail.email}</div>
-              {detail.company && <div><span className="text-slate-500">Company:</span> {detail.company}</div>}
-              <div><span className="text-slate-500">Categories:</span> {categories(detail)}</div>
-              {detail.budget && <div><span className="text-slate-500">Budget:</span> {detail.budget}</div>}
-              {detail.timeline && <div><span className="text-slate-500">Timeline:</span> {detail.timeline}</div>}
-            </dl>
-            <p className="mt-4 whitespace-pre-wrap text-sm">{detail.overview}</p>
-            {detail.answers && Object.keys(typeof detail.answers === 'string' ? JSON.parse(detail.answers) : detail.answers).length > 0 && (
-              <div className="mt-4 rounded-lg bg-slate-900 p-3 text-sm">
-                <p className="text-xs uppercase text-slate-500">Details</p>
-                {Object.entries(typeof detail.answers === 'string' ? JSON.parse(detail.answers) : detail.answers).map(([k, v]) => (
-                  <p key={k} className="mt-2"><span className="text-slate-500">{k}:</span> {v}</p>
-                ))}
-              </div>
-            )}
-            <div className="mt-4 flex flex-wrap gap-2">
-              <select className={inputCls()} value={detail.status} onChange={e => setStatus(e.target.value)}>
-                {['new', 'reviewing', 'replied', 'closed'].map(s => <option key={s} value={s}>{s}</option>)}
-              </select>
-              <a className="rounded-lg bg-indigo-600 px-3 py-2 text-sm text-white" href={'mailto:' + detail.email + '?subject=Re: Your CreativeBuilds inquiry'}>Reply by email</a>
-            </div>
-          </div>
-        )}
+    <div className="min-w-0 space-y-6">
+      <div>
+        <h2 className="text-xl font-semibold text-white">Project inquiries</h2>
+        <p className="mt-1 text-sm text-slate-400">Inquiry + Project Vibe Check from www — Cal follow-up runs automatically</p>
       </div>
+      <Table
+        columns={[
+          { key: 'name', label: 'Name' },
+          { key: 'email', label: 'Email' },
+          { key: 'source', label: 'Source', render: r => r.source || 'inquiry' },
+          { key: 'status', label: 'Status' },
+          { key: 'created_at', label: 'When', render: r => new Date(r.created_at).toLocaleString() },
+        ]}
+        rows={rows}
+        onEdit={open}
+        onDelete={async () => {}}
+      />
+      {detail && (
+        <div className="rounded-xl border border-slate-500 bg-slate-800/80 p-4 text-slate-100">
+          <h3 className="font-semibold text-white">#{detail.id} {detail.name}</h3>
+          <dl className="mt-2 grid gap-1 text-sm text-slate-300 sm:grid-cols-2">
+            <div><span className="text-slate-500">Email:</span> {detail.email}</div>
+            {detail.company && <div><span className="text-slate-500">Company:</span> {detail.company}</div>}
+            <div><span className="text-slate-500">Source:</span> {detail.source || 'inquiry'}</div>
+            <div><span className="text-slate-500">Categories:</span> {categories(detail)}</div>
+            {detail.budget && <div><span className="text-slate-500">Budget:</span> {detail.budget}</div>}
+            {detail.timeline && <div><span className="text-slate-500">Timeline:</span> {detail.timeline}</div>}
+            {detail.cal_booking_uid && <div><span className="text-slate-500">Cal follow-up:</span> {detail.cal_booking_uid}</div>}
+          </dl>
+          <p className="mt-4 whitespace-pre-wrap text-sm">{detail.overview}</p>
+          {detail.answers && Object.keys(typeof detail.answers === 'string' ? JSON.parse(detail.answers) : detail.answers).length > 0 && (
+            <div className="mt-4 rounded-lg bg-slate-900 p-3 text-sm">
+              <p className="text-xs uppercase text-slate-500">Details</p>
+              {Object.entries(typeof detail.answers === 'string' ? JSON.parse(detail.answers) : detail.answers).map(([k, v]) => (
+                <p key={k} className="mt-2"><span className="text-slate-500">{k}:</span> {v}</p>
+              ))}
+            </div>
+          )}
+          <div className="mt-4 flex flex-wrap gap-2">
+            <select className={inputCls()} value={detail.status} onChange={e => setStatus(e.target.value)}>
+              {['new', 'reviewing', 'replied', 'closed'].map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+            <a className="rounded-lg bg-indigo-600 px-3 py-2 text-sm text-white" href={'mailto:' + detail.email + '?subject=Re: Your CreativeBuilds inquiry'}>Reply by email</a>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -846,7 +1252,8 @@ function InquiriesSection() {
 function Dashboard({ stats }) {
   if (!stats) return null;
   const cards = [
-    ['Products', stats.products], ['Blog posts', stats.blog_posts], ['Portfolio', stats.portfolio],
+    ['Products', stats.products], ['Portfolio', stats.portfolio],
+    ['SEO pages', stats.seo_pages || 0],
     ['Open tickets', stats.open_tickets], ['New inquiries', stats.new_inquiries || 0], ['Upcoming bookings', stats.upcoming_bookings], ['Subscribers', stats.subscribers],
   ];
   return (
@@ -1075,54 +1482,162 @@ function StripeSection() {
 const NAV = [
   ['dashboard', 'Dashboard'],
   ['products', 'Products'],
-  ['blog', 'Blog'],
+  ['content-engine', 'Content Engine'],
   ['portfolio', 'Portfolio'],
   ['home-apps', 'Home apps'],
   ['calendar', 'Calendar'],
   ['inquiries', 'Inquiries'],
+  ['live-chat', 'Live Chat'],
+  ['quotes', 'Quotes'],
   ['tickets', 'Tickets'],
   ['orders', 'Orders'],
   ['newsletter', 'Newsletter'],
   ['stripe', 'Stripe'],
 ];
 
+function AdminNav({ section, setSection, onNavigate, awaitingCount = 0 }) {
+  return (
+    <nav className="mt-6 space-y-1">
+      {NAV.map(([id, label]) => (
+        <button
+          key={id}
+          type="button"
+          onClick={() => {
+            setSection(id);
+            onNavigate?.();
+          }}
+          className={
+            'flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-left text-sm min-h-11 ' +
+            (section === id ? 'bg-indigo-600 font-medium' : 'text-slate-300 hover:bg-slate-800')
+          }
+        >
+          <span>{label}</span>
+          {id === 'live-chat' && awaitingCount > 0 ? (
+            <span className="rounded-full bg-amber-500 px-2 py-0.5 text-xs font-semibold text-slate-900">
+              {awaitingCount}
+            </span>
+          ) : null}
+        </button>
+      ))}
+    </nav>
+  );
+}
+
 function AdminApp({ user, onLogout }) {
   const [section, setSection] = useState('dashboard');
   const [stats, setStats] = useState(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [awaitingCount, setAwaitingCount] = useState(0);
+  const [liveChatThreadId, setLiveChatThreadId] = useState(null);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('section') === 'live-chat') {
+      setSection('live-chat');
+      const tid = params.get('thread');
+      if (tid) setLiveChatThreadId(tid);
+    }
+  }, []);
+
   useEffect(() => {
     api('/admin/stats').then(setStats).catch(console.error);
   }, [section]);
 
+  useEffect(() => {
+    const tick = () =>
+      api('/admin/chat/awaiting-count')
+        .then((r) => setAwaitingCount(r.count || 0))
+        .catch(() => {});
+    tick();
+    const id = setInterval(tick, 5000);
+    return () => clearInterval(id);
+  }, []);
+
+  useEffect(() => {
+    document.body.style.overflow = menuOpen ? 'hidden' : '';
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [menuOpen]);
+
+  useEffect(() => {
+    function onKey(e) {
+      if (e.key === 'Escape') setMenuOpen(false);
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
   const content = {
     dashboard: <Dashboard stats={stats} />,
     products: <ProductsSection />,
-    blog: <BlogSection />,
+    'content-engine': <ContentEngineSection api={api} Btn={Btn} Table={Table} Field={Field} inputCls={inputCls} />,
     portfolio: <PortfolioSection />,
     'home-apps': <HomeAppsSection />,
     calendar: <CalendarSection />,
     inquiries: <InquiriesSection />,
+    'live-chat': (
+      <LiveChatSection
+        initialThreadId={liveChatThreadId}
+        onThreadOpened={() => setLiveChatThreadId(null)}
+      />
+    ),
+    quotes: <QuotesSection api={api} Btn={Btn} Table={Table} Field={Field} inputCls={inputCls} />,
     tickets: <TicketsSection />,
     orders: <OrdersSection />,
     newsletter: <NewsletterSection />,
     stripe: <StripeSection />,
   };
 
+  const closeMenu = () => setMenuOpen(false);
+
   return (
-    <div className="flex min-h-screen">
-      <aside className="w-56 shrink-0 border-r border-slate-600 bg-slate-900 p-4">
+    <div className="flex min-h-screen flex-col lg:flex-row">
+      <header className="sticky top-0 z-[60] flex h-14 items-center gap-3 border-b border-slate-600 bg-slate-900 px-4 lg:hidden">
+        <button
+          type="button"
+          className="inline-flex h-11 w-11 flex-col items-center justify-center gap-1.5 rounded-lg border border-slate-600"
+          aria-expanded={menuOpen}
+          aria-controls="admin-mobile-nav"
+          aria-label={menuOpen ? 'Close menu' : 'Open menu'}
+          onClick={() => setMenuOpen((v) => !v)}
+        >
+          <span className={'block h-0.5 w-4 bg-current transition ' + (menuOpen ? 'translate-y-2 rotate-45' : '')} />
+          <span className={'block h-0.5 w-4 bg-current transition ' + (menuOpen ? 'opacity-0' : '')} />
+          <span className={'block h-0.5 w-4 bg-current transition ' + (menuOpen ? '-translate-y-2 -rotate-45' : '')} />
+        </button>
+        <div className="min-w-0">
+          <p className="text-xs font-semibold uppercase tracking-wider text-indigo-300">CreativeBuilds</p>
+          <p className="truncate text-sm text-slate-300">{user.email}</p>
+        </div>
+      </header>
+
+      {menuOpen ? (
+        <div className="fixed inset-0 top-14 z-50 lg:hidden" role="presentation">
+          <button type="button" className="absolute inset-0 bg-black/60" aria-label="Close menu" onClick={closeMenu} />
+          <aside
+            id="admin-mobile-nav"
+            className="absolute inset-y-0 left-0 flex w-72 max-w-[85vw] flex-col border-r border-slate-600 bg-slate-900 p-4 shadow-xl"
+          >
+            <p className="text-xs font-semibold uppercase tracking-wider text-indigo-300">CreativeBuilds</p>
+            <p className="mt-1 truncate text-sm text-slate-300">{user.email}</p>
+            <AdminNav section={section} setSection={setSection} onNavigate={closeMenu} awaitingCount={awaitingCount} />
+            <button type="button" onClick={onLogout} className="mt-8 min-h-11 text-left text-sm text-slate-500 hover:text-white">
+              Sign out
+            </button>
+          </aside>
+        </div>
+      ) : null}
+
+      <aside className="hidden w-56 shrink-0 border-r border-slate-600 bg-slate-900 p-4 lg:block">
         <p className="text-xs font-semibold uppercase tracking-wider text-indigo-300">CreativeBuilds</p>
         <p className="mt-1 truncate text-sm text-slate-300">{user.email}</p>
-        <nav className="mt-6 space-y-1">
-          {NAV.map(([id, label]) => (
-            <button key={id} type="button" onClick={() => setSection(id)}
-              className={'block w-full rounded-lg px-3 py-2 text-left text-sm ' + (section === id ? 'bg-indigo-600 font-medium' : 'text-slate-300 hover:bg-slate-800')}>
-              {label}
-            </button>
-          ))}
-        </nav>
-        <button type="button" onClick={onLogout} className="mt-8 text-sm text-slate-500 hover:text-white">Sign out</button>
+        <AdminNav section={section} setSection={setSection} awaitingCount={awaitingCount} />
+        <button type="button" onClick={onLogout} className="mt-8 text-sm text-slate-500 hover:text-white">
+          Sign out
+        </button>
       </aside>
-      <main className="flex-1 overflow-auto bg-slate-950 p-8 text-slate-100">{content[section]}</main>
+      <main className="min-w-0 flex-1 overflow-auto bg-slate-950 p-4 text-slate-100 sm:p-6 lg:p-8">{content[section]}</main>
     </div>
   );
 }

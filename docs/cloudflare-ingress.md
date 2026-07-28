@@ -9,9 +9,9 @@
 | `www.creativebuilds.dev` | `http://localhost:3001` | **Primary — live** |
 | `www.creativebuilds.dev/api/*` | `http://localhost:3021` | Via ingress routing |
 | `creativebuilds.dev` | 301 → `https://www.creativebuilds.dev` | Apex redirect |
-| `studio.creativebuilds.dev` | `http://localhost:3020` | Secondary studio shell |
-| `admin.creativebuilds.dev` | `http://localhost:3020` | Admin CMS |
-| `app.creativebuilds.dev` | `http://localhost:3002` | When dashboard deployed |
+| `studio.creativebuilds.dev` | tunnel → `:3020` ingress → `:3021` cbdev | iOS Creative Studio shell (needs DNS CNAME to tunnel) |
+| `admin.creativebuilds.dev` | tunnel → `:3020` ingress → `:3021` cbdev | Admin CMS |
+| `app.creativebuilds.dev` | `http://localhost:3004` | Client dashboard (`@cbdev/dashboard` PM2) |
 | `demo.creativebuilds.dev` | `http://localhost:3003` | When demo deployed |
 | `media.creativebuilds.dev` | `http://localhost:8096` | Jellyfin + Cloudflare Access |
 

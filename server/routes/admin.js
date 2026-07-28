@@ -2,13 +2,30 @@ import { Router } from 'express';
 import { query } from '../db.js';
 import { requireAdmin } from '../auth.js';
 import { productImageUpload } from '../lib/uploads.js';
-import { sanitizeHtml, resolveBodyHtml } from '../lib/blogHtml.js';
-import { runBlogAssist } from '../lib/blogWritingAssist.js';
-import { refreshBlogIdeasNow } from '../lib/blogIdeasScheduler.js';
-import { sendNewsletterBroadcast } from '../lib/email.js';
+import { sendNewsletterBroadcast, sendQuoteToClient, quoteLink } from '../lib/email.js';
+import {
+  calConfigured,
+  calManageLinks,
+  getCalCalendarSummary,
+  listCalBookings,
+  listCalEventTypes,
+} from '../lib/calStore.js';
+import { assertEarlyBirdQuoteSlot, EARLYBIRD_CODE } from '../lib/stripe.js';
+import contentEngineRoutes from './content-engine.js';
+import {
+  listThreadsAdmin,
+  getThreadById,
+  listAllMessages,
+  claimThread,
+  releaseToMiranda,
+  closeThread,
+  insertMessage,
+  countAwaitingThreads,
+} from '../lib/mirandaChat.js';
 
 const router = Router();
 router.use(requireAdmin);
+router.use('/content-engine', contentEngineRoutes);
 
 router.post('/uploads/product-image', (req, res) => {
   productImageUpload.single('image')(req, res, (err) => {
@@ -29,36 +46,18 @@ function slugify(text) {
     .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'item';
 }
 
-async function ensureUniqueSlug(baseSlug, excludeId = null) {
-  const normalized = String(baseSlug || 'post').slice(0, 120) || 'post';
-  const check = async (slug) => {
-    const params = excludeId ? [slug, excludeId] : [slug];
-    const sql = excludeId
-      ? 'SELECT 1 FROM blog_posts WHERE slug = $1 AND id != $2 LIMIT 1'
-      : 'SELECT 1 FROM blog_posts WHERE slug = $1 LIMIT 1';
-    const { rows } = await query(sql, params);
-    return rows.length > 0;
-  };
-
-  if (!(await check(normalized))) return normalized;
-  for (let n = 2; n < 100; n++) {
-    const candidate = `${normalized.slice(0, 110)}-${n}`;
-    if (!(await check(candidate))) return candidate;
-  }
-  return `${normalized.slice(0, 100)}-${Date.now()}`;
-}
-
 router.get('/stats', async (_req, res) => {
   try {
     const { rows } = await query(`
       SELECT
         (SELECT count(*)::int FROM products WHERE active) AS products,
-        (SELECT count(*)::int FROM blog_posts) AS blog_posts,
         (SELECT count(*)::int FROM portfolio_projects WHERE active) AS portfolio,
         (SELECT count(*)::int FROM support_tickets WHERE status = 'open') AS open_tickets,
         (SELECT count(*)::int FROM inquiry_submissions WHERE status = 'new') AS new_inquiries,
         (SELECT count(*)::int FROM bookings WHERE status = 'confirmed' AND starts_at >= now()) AS upcoming_bookings,
-        (SELECT count(*)::int FROM newsletter_subscribers) AS subscribers
+        (SELECT count(*)::int FROM newsletter_subscribers) AS subscribers,
+        (SELECT CASE WHEN to_regclass('public.seo_pages') IS NULL THEN 0
+          ELSE (SELECT count(*)::int FROM seo_pages WHERE status = 'published') END) AS seo_pages
     `);
     res.json(rows[0]);
   } catch (err) {
@@ -138,137 +137,6 @@ router.put('/categories/:slug', async (req, res) => {
 
 router.delete('/categories/:slug', async (req, res) => {
   await query('DELETE FROM product_categories WHERE slug = $1', [req.params.slug]);
-  res.json({ ok: true });
-});
-
-/* ---------- Blog ---------- */
-router.get('/blog', async (_req, res) => {
-  try {
-    const { rows } = await query('SELECT * FROM blog_posts ORDER BY published_at DESC NULLS LAST, id DESC');
-    res.json({
-      posts: rows.map((row) => ({
-        ...row,
-        body_html: resolveBodyHtml(row),
-      })),
-    });
-  } catch (err) {
-    console.error('admin blog list:', err);
-    res.status(500).json({ error: 'Failed to load posts' });
-  }
-});
-
-router.post('/blog/assist', async (req, res) => {
-  try {
-    const result = await runBlogAssist(req.body || {});
-    res.json(result);
-  } catch (err) {
-    console.error('blog assist:', err);
-    res.status(500).json({ error: err.message || 'Assist failed' });
-  }
-});
-
-router.get('/blog/ideas', async (_req, res) => {
-  try {
-    const { rows } = await query(
-      `SELECT * FROM blog_ideas WHERE status = 'suggested' ORDER BY score DESC, created_at DESC LIMIT 30`,
-    );
-    res.json({ ideas: rows });
-  } catch (err) {
-    console.error('blog ideas list:', err);
-    res.status(500).json({ error: 'Failed to load ideas' });
-  }
-});
-
-router.post('/blog/ideas/refresh', async (_req, res) => {
-  try {
-    const result = await refreshBlogIdeasNow();
-    res.json(result);
-  } catch (err) {
-    if (err.code === 'BUSY') {
-      res.status(409).json({ error: err.message });
-      return;
-    }
-    console.error('blog ideas refresh:', err);
-    res.status(500).json({ error: err.message || 'Refresh failed' });
-  }
-});
-
-router.post('/blog/ideas/:id/dismiss', async (req, res) => {
-  try {
-    const { rows } = await query(
-      `UPDATE blog_ideas SET status = 'dismissed' WHERE id = $1 RETURNING *`,
-      [req.params.id],
-    );
-    if (!rows[0]) { res.status(404).json({ error: 'Not found' }); return; }
-    res.json({ idea: rows[0] });
-  } catch (err) {
-    console.error('blog idea dismiss:', err);
-    res.status(500).json({ error: 'Failed to dismiss idea' });
-  }
-});
-
-router.post('/blog/ideas/:id/use', async (req, res) => {
-  try {
-    const { rows } = await query(
-      `UPDATE blog_ideas SET status = 'used', used_at = NOW() WHERE id = $1 RETURNING *`,
-      [req.params.id],
-    );
-    if (!rows[0]) { res.status(404).json({ error: 'Not found' }); return; }
-    res.json({ idea: rows[0] });
-  } catch (err) {
-    console.error('blog idea use:', err);
-    res.status(500).json({ error: 'Failed to mark idea used' });
-  }
-});
-
-router.post('/blog', async (req, res) => {
-  try {
-    const b = req.body;
-    const slug = await ensureUniqueSlug(b.slug || slugify(b.title));
-    const bodyHtml = sanitizeHtml(b.body_html || '');
-    const { rows } = await query(
-      `INSERT INTO blog_posts (slug, title, excerpt, body, body_html, read_time, status, published_at)
-       VALUES ($1,$2,$3,'[]'::jsonb,$4,$5,$6,$7) RETURNING *`,
-      [slug, b.title, b.excerpt || '', bodyHtml, b.read_time || '',
-        b.status || 'draft', b.published_at || null],
-    );
-    res.status(201).json({ post: { ...rows[0], body_html: bodyHtml } });
-  } catch (err) {
-    console.error('admin blog create:', err);
-    res.status(500).json({ error: err.message || 'Failed to create post' });
-  }
-});
-
-router.put('/blog/:id', async (req, res) => {
-  try {
-    const b = req.body;
-    const slug = await ensureUniqueSlug(b.slug || slugify(b.title), Number(req.params.id));
-    const bodyHtml = sanitizeHtml(b.body_html || '');
-    const { rows } = await query(
-      `UPDATE blog_posts SET slug=$1, title=$2, excerpt=$3, body_html=$4, read_time=$5, status=$6, published_at=$7
-       WHERE id=$8 RETURNING *`,
-      [slug, b.title, b.excerpt, bodyHtml, b.read_time, b.status, b.published_at, req.params.id],
-    );
-    if (!rows[0]) { res.status(404).json({ error: 'Not found' }); return; }
-    res.json({ post: { ...rows[0], body_html: bodyHtml } });
-  } catch (err) {
-    console.error('admin blog update:', err);
-    res.status(500).json({ error: err.message || 'Failed to update post' });
-  }
-});
-
-router.post('/blog/:id/publish', async (req, res) => {
-  const { rows } = await query(
-    `UPDATE blog_posts SET status = 'published', published_at = COALESCE(published_at, NOW())
-     WHERE id = $1 RETURNING *`,
-    [req.params.id],
-  );
-  if (!rows[0]) { res.status(404).json({ error: 'Not found' }); return; }
-  res.json({ post: rows[0] });
-});
-
-router.delete('/blog/:id', async (req, res) => {
-  await query('DELETE FROM blog_posts WHERE id = $1', [req.params.id]);
   res.json({ ok: true });
 });
 
@@ -405,76 +273,62 @@ router.delete('/home-apps/:id', async (req, res) => {
   res.json({ ok: true });
 });
 
-/* ---------- Calendar ---------- */
-router.get('/calendar/settings', async (_req, res) => {
-  const { rows } = await query('SELECT * FROM availability_settings WHERE id = 1');
-  res.json({ settings: rows[0] });
+/* ---------- Calendar (Cal.diy live data) ---------- */
+router.get('/calendar/summary', async (_req, res) => {
+  try {
+    if (!calConfigured()) {
+      res.json({
+        configured: false,
+        manage: calManageLinks(),
+        error: 'CAL_DATABASE_URL is not set on the Express host',
+      });
+      return;
+    }
+    res.json(await getCalCalendarSummary());
+  } catch (err) {
+    console.error('admin calendar summary:', err);
+    res.status(500).json({ error: err.message || 'Failed to load Cal.diy calendar' });
+  }
 });
 
-router.put('/calendar/settings', async (req, res) => {
-  const b = req.body;
-  const { rows } = await query(
-    `UPDATE availability_settings SET timezone=$1, weekday_start=$2, weekday_end=$3,
-      slot_interval_minutes=$4, work_weekdays=$5, blocked_dates=$6
-     WHERE id=1 RETURNING *`,
-    [b.timezone, b.weekday_start, b.weekday_end, b.slot_interval_minutes,
-      b.work_weekdays, b.blocked_dates || []],
-  );
-  res.json({ settings: rows[0] });
+router.get('/calendar/bookings', async (req, res) => {
+  try {
+    if (!calConfigured()) {
+      res.status(503).json({ error: 'CAL_DATABASE_URL is not set' });
+      return;
+    }
+    const bookings = await listCalBookings({
+      from: req.query.from,
+      to: req.query.to,
+      status: req.query.status,
+    });
+    res.json({ bookings, manage: calManageLinks() });
+  } catch (err) {
+    console.error('admin calendar bookings:', err);
+    res.status(500).json({ error: err.message || 'Failed to load bookings' });
+  }
 });
 
-router.get('/calendar/types', async (_req, res) => {
-  const { rows } = await query('SELECT * FROM meeting_types ORDER BY sort_order, id');
-  res.json({ types: rows });
-});
-
-router.post('/calendar/types', async (req, res) => {
-  const b = req.body;
-  const { rows } = await query(
-    `INSERT INTO meeting_types (slug, label, duration_minutes, description, active, sort_order)
-     VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-    [b.slug || slugify(b.label), b.label, b.duration_minutes, b.description || '', b.active !== false, b.sort_order ?? 0],
-  );
-  res.status(201).json({ type: rows[0] });
-});
-
-router.put('/calendar/types/:slug', async (req, res) => {
-  const b = req.body;
-  const { rows } = await query(
-    `UPDATE meeting_types SET label=$1, duration_minutes=$2, description=$3, active=$4, sort_order=$5
-     WHERE slug=$6 RETURNING *`,
-    [b.label, b.duration_minutes, b.description, b.active !== false, b.sort_order ?? 0, req.params.slug],
-  );
-  if (!rows[0]) { res.status(404).json({ error: 'Not found' }); return; }
-  res.json({ type: rows[0] });
-});
-
-router.delete('/calendar/types/:slug', async (req, res) => {
-  await query('DELETE FROM meeting_types WHERE slug = $1', [req.params.slug]);
-  res.json({ ok: true });
-});
-
-router.get('/calendar/bookings', async (_req, res) => {
-  const { rows } = await query(
-    `SELECT b.*, u.email AS user_email, u.name AS user_name, mt.label AS type_label
-     FROM bookings b
-     JOIN users u ON u.id = b.user_id
-     JOIN meeting_types mt ON mt.slug = b.meeting_type_slug
-     ORDER BY b.starts_at DESC LIMIT 200`,
-  );
-  res.json({ bookings: rows });
-});
-
-router.delete('/calendar/bookings/:id', async (req, res) => {
-  await query(`UPDATE bookings SET status = 'cancelled' WHERE id = $1`, [req.params.id]);
-  res.json({ ok: true });
+router.get('/calendar/event-types', async (_req, res) => {
+  try {
+    if (!calConfigured()) {
+      res.status(503).json({ error: 'CAL_DATABASE_URL is not set' });
+      return;
+    }
+    res.json({ eventTypes: await listCalEventTypes(), manage: calManageLinks() });
+  } catch (err) {
+    console.error('admin calendar event-types:', err);
+    res.status(500).json({ error: err.message || 'Failed to load event types' });
+  }
 });
 
 /* ---------- Project inquiries (www marketing form) ---------- */
 router.get('/inquiries', async (_req, res) => {
   const { rows } = await query(
-    `SELECT id, name, email, company, categories, overview, answers, budget, timeline, status, created_at
-     FROM inquiry_submissions ORDER BY created_at DESC LIMIT 200`,
+    `SELECT i.id, i.name, i.email, i.company, i.categories, i.overview, i.answers, i.budget, i.timeline,
+            i.status, i.source, i.cal_booking_uid, i.created_at
+     FROM inquiry_submissions i
+     ORDER BY i.created_at DESC LIMIT 200`,
   );
   res.json({ inquiries: rows });
 });
@@ -644,7 +498,7 @@ router.put('/stripe/settings', async (req, res) => {
 router.get('/stripe/subscriptions', async (_req, res) => {
   try {
     const { rows } = await query(
-      `SELECT hs.*, u.email AS user_email, u.display_name AS user_name
+      `SELECT hs.*, u.email AS user_email, u.name AS user_name
        FROM hosting_subscriptions hs
        LEFT JOIN users u ON u.id = hs.user_id
        ORDER BY hs.created_at DESC LIMIT 100`,
@@ -654,6 +508,148 @@ router.get('/stripe/subscriptions', async (_req, res) => {
     console.error('admin subscriptions:', err);
     res.status(500).json({ error: 'Failed to load subscriptions' });
   }
+});
+
+/* ---------- Quotes ---------- */
+function generateQuoteId() {
+  return `CB-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+}
+
+function normalizeQuoteBody(b) {
+  const items = Array.isArray(b.line_items) ? b.line_items : [];
+  const total = Math.max(0, Math.round(Number(b.total_cents) || 0));
+  const depositPct = Math.min(100, Math.max(0, Math.round(Number(b.deposit_pct) || 25)));
+  const deposit = b.deposit_cents != null
+    ? Math.max(0, Math.round(Number(b.deposit_cents)))
+    : Math.round((total * depositPct) / 100);
+  const rawPromo = b.promo_code != null ? String(b.promo_code).trim().toUpperCase() : '';
+  return {
+    client_name: b.client_name ? String(b.client_name).trim() : null,
+    client_email: String(b.client_email || '').trim().toLowerCase(),
+    company: b.company ? String(b.company).trim() : null,
+    category: b.category ? String(b.category).trim() : null,
+    tier: b.tier ? String(b.tier).trim() : null,
+    line_items: JSON.stringify(items),
+    answers: JSON.stringify(b.answers || {}),
+    notes: JSON.stringify(b.notes || {}),
+    subtotal_cents: total,
+    total_cents: total,
+    deposit_cents: deposit,
+    deposit_pct: depositPct,
+    inquiry_id: b.inquiry_id ? Number(b.inquiry_id) : null,
+    promo_code: rawPromo || null,
+  };
+}
+
+router.get('/quotes', async (_req, res) => {
+  try {
+    const { rows } = await query(
+      `SELECT id, public_id, client_name, client_email, company, category, tier,
+              total_cents, deposit_cents, deposit_pct, status, inquiry_id, paid_at, created_at
+       FROM quotes ORDER BY created_at DESC LIMIT 200`,
+    );
+    res.json({ quotes: rows });
+  } catch (err) {
+    console.error('admin quotes list:', err);
+    res.status(500).json({ error: 'Failed to load quotes' });
+  }
+});
+
+router.get('/quotes/:id', async (req, res) => {
+  const { rows } = await query('SELECT * FROM quotes WHERE id = $1', [req.params.id]);
+  if (!rows[0]) { res.status(404).json({ error: 'Not found' }); return; }
+  res.json({ quote: rows[0], link: quoteLink(rows[0].public_id) });
+});
+
+router.post('/quotes', async (req, res) => {
+  try {
+    const q = normalizeQuoteBody(req.body);
+    if (!q.client_email || !q.client_email.includes('@')) {
+      res.status(400).json({ error: 'Valid client email required' });
+      return;
+    }
+    if (q.promo_code === EARLYBIRD_CODE) {
+      await assertEarlyBirdQuoteSlot();
+    }
+    const publicId = generateQuoteId();
+    const validUntil = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+    const { rows } = await query(
+      `INSERT INTO quotes
+        (public_id, client_name, client_email, company, category, tier, line_items, answers, notes,
+         subtotal_cents, total_cents, deposit_cents, deposit_pct, inquiry_id, valid_until, created_by, status, promo_code)
+       VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9::jsonb,$10,$11,$12,$13,$14,$15,$16,'draft',$17)
+       RETURNING *`,
+      [publicId, q.client_name, q.client_email, q.company, q.category, q.tier, q.line_items, q.answers, q.notes,
+        q.subtotal_cents, q.total_cents, q.deposit_cents, q.deposit_pct, q.inquiry_id, validUntil, req.userId, q.promo_code],
+    );
+    res.status(201).json({ quote: rows[0], link: quoteLink(publicId) });
+  } catch (err) {
+    console.error('admin quote create:', err);
+    const status = err.status || 500;
+    res.status(status).json({ error: err.message || 'Failed to create quote' });
+  }
+});
+
+router.patch('/quotes/:id', async (req, res) => {
+  try {
+    const b = req.body;
+    const status = b.status && ['draft', 'sent', 'paid'].includes(b.status) ? b.status : null;
+    // Full re-save when line items provided; otherwise light status/contact update.
+    if (Array.isArray(b.line_items)) {
+      const q = normalizeQuoteBody(b);
+      if (q.promo_code === EARLYBIRD_CODE) {
+        const { rows: existing } = await query('SELECT promo_code FROM quotes WHERE id = $1', [req.params.id]);
+        const already = existing[0] && String(existing[0].promo_code || '').toUpperCase() === EARLYBIRD_CODE;
+        if (!already) await assertEarlyBirdQuoteSlot();
+      }
+      const { rows } = await query(
+        `UPDATE quotes SET
+           client_name=$1, client_email=COALESCE($2, client_email), company=$3, category=$4, tier=$5,
+           line_items=$6::jsonb, answers=$7::jsonb, notes=$8::jsonb,
+           subtotal_cents=$9, total_cents=$10, deposit_cents=$11, deposit_pct=$12,
+           status=COALESCE($13, status), promo_code=$14, updated_at=now()
+         WHERE id=$15 RETURNING *`,
+        [q.client_name, q.client_email || null, q.company, q.category, q.tier,
+          q.line_items, q.answers, q.notes, q.subtotal_cents, q.total_cents, q.deposit_cents, q.deposit_pct,
+          status, q.promo_code, req.params.id],
+      );
+      if (!rows[0]) { res.status(404).json({ error: 'Not found' }); return; }
+      res.json({ quote: rows[0] });
+      return;
+    }
+    const { rows } = await query(
+      `UPDATE quotes SET status = COALESCE($1, status), updated_at = now() WHERE id = $2 RETURNING *`,
+      [status, req.params.id],
+    );
+    if (!rows[0]) { res.status(404).json({ error: 'Not found' }); return; }
+    res.json({ quote: rows[0] });
+  } catch (err) {
+    console.error('admin quote update:', err);
+    res.status(500).json({ error: 'Failed to update quote' });
+  }
+});
+
+router.post('/quotes/:id/send', async (req, res) => {
+  try {
+    const { rows } = await query('SELECT * FROM quotes WHERE id = $1', [req.params.id]);
+    const quote = rows[0];
+    if (!quote) { res.status(404).json({ error: 'Not found' }); return; }
+    const emailResult = await sendQuoteToClient(quote);
+    const nextStatus = quote.status === 'paid' ? 'paid' : 'sent';
+    const { rows: updated } = await query(
+      `UPDATE quotes SET status = $1, updated_at = now() WHERE id = $2 RETURNING *`,
+      [nextStatus, req.params.id],
+    );
+    res.json({ quote: updated[0], emailed: emailResult.ok !== false, link: quoteLink(quote.public_id) });
+  } catch (err) {
+    console.error('admin quote send:', err);
+    res.status(500).json({ error: 'Failed to send quote' });
+  }
+});
+
+router.delete('/quotes/:id', async (req, res) => {
+  await query('DELETE FROM quotes WHERE id = $1', [req.params.id]);
+  res.json({ ok: true });
 });
 
 /* ---------- Merch orders ---------- */
@@ -678,6 +674,156 @@ router.get('/orders', async (_req, res) => {
      LIMIT 100`,
   );
   res.json({ orders: rows });
+});
+
+router.post('/sim-client-invite', async (req, res) => {
+  try {
+    const { sendSimClientInvite } = await import('../lib/platformTenant.js');
+    const result = await sendSimClientInvite({
+      email: req.body.email,
+      name: req.body.name,
+      businessName: req.body.businessName,
+      slug: req.body.slug,
+      tier: req.body.tier || 'signature',
+    });
+    res.json({
+      ok: true,
+      onboardingUrl: result.onboardingUrl,
+      tenantSlug: result.tenant.slug,
+      devToken: process.env.NODE_ENV !== 'production' ? result.devToken : undefined,
+    });
+  } catch (err) {
+    console.error('sim-client-invite:', err);
+    res.status(500).json({ error: err.message || 'Invite failed' });
+  }
+});
+
+/* ---------- Miranda live chat ---------- */
+
+router.get('/chat/awaiting-count', async (_req, res) => {
+  try {
+    const count = await countAwaitingThreads();
+    res.json({ count });
+  } catch (err) {
+    console.error('admin chat count:', err);
+    res.status(500).json({ error: 'Failed to load count' });
+  }
+});
+
+router.get('/chat/threads', async (req, res) => {
+  try {
+    const status = req.query.status ? String(req.query.status) : 'all';
+    const threads = await listThreadsAdmin({ status });
+    res.json({ threads });
+  } catch (err) {
+    console.error('admin chat list:', err);
+    res.status(500).json({ error: 'Failed to load threads' });
+  }
+});
+
+router.get('/chat/threads/:id', async (req, res) => {
+  try {
+    const thread = await getThreadById(req.params.id);
+    if (!thread) {
+      res.status(404).json({ error: 'Not found' });
+      return;
+    }
+    const messages = await listAllMessages(thread.id);
+    res.json({ thread, messages });
+  } catch (err) {
+    console.error('admin chat get:', err);
+    res.status(500).json({ error: 'Failed to load thread' });
+  }
+});
+
+router.post('/chat/threads/:id/accept', async (req, res) => {
+  try {
+    const thread = await claimThread(req.params.id, 'ryan');
+    if (!thread) {
+      res.status(404).json({ error: 'Not found or not claimable' });
+      return;
+    }
+    await insertMessage({
+      threadId: thread.id,
+      role: 'system',
+      body: 'Ryan joined the chat.',
+    });
+    const messages = await listAllMessages(thread.id);
+    res.json({ thread, messages });
+  } catch (err) {
+    console.error('admin chat accept:', err);
+    res.status(500).json({ error: 'Failed to accept chat' });
+  }
+});
+
+router.post('/chat/threads/:id/release', async (req, res) => {
+  try {
+    const thread = await releaseToMiranda(req.params.id);
+    if (!thread) {
+      res.status(404).json({ error: 'Not found' });
+      return;
+    }
+    await insertMessage({
+      threadId: thread.id,
+      role: 'system',
+      body: 'Ryan handed you back to Miranda.',
+    });
+    await insertMessage({
+      threadId: thread.id,
+      role: 'miranda',
+      body: "Ryan stepped away — I'm still here if you need pricing, Free Service Audits, or to book a Discovery Call.",
+    });
+    const messages = await listAllMessages(thread.id);
+    res.json({ thread, messages });
+  } catch (err) {
+    console.error('admin chat release:', err);
+    res.status(500).json({ error: 'Failed to release chat' });
+  }
+});
+
+router.post('/chat/threads/:id/close', async (req, res) => {
+  try {
+    const thread = await closeThread(req.params.id);
+    if (!thread) {
+      res.status(404).json({ error: 'Not found' });
+      return;
+    }
+    await insertMessage({
+      threadId: thread.id,
+      role: 'system',
+      body: 'Chat closed.',
+    });
+    const messages = await listAllMessages(thread.id);
+    res.json({ thread, messages });
+  } catch (err) {
+    console.error('admin chat close:', err);
+    res.status(500).json({ error: 'Failed to close chat' });
+  }
+});
+
+router.post('/chat/threads/:id/messages', async (req, res) => {
+  try {
+    const body = String(req.body.body || '').trim();
+    if (!body) {
+      res.status(400).json({ error: 'Message required' });
+      return;
+    }
+    const thread = await getThreadById(req.params.id);
+    if (!thread) {
+      res.status(404).json({ error: 'Not found' });
+      return;
+    }
+    if (thread.status !== 'live') {
+      res.status(409).json({ error: 'Accept the chat before replying' });
+      return;
+    }
+    await insertMessage({ threadId: thread.id, role: 'ryan', body });
+    const messages = await listAllMessages(thread.id);
+    res.json({ thread: await getThreadById(thread.id), messages });
+  } catch (err) {
+    console.error('admin chat reply:', err);
+    res.status(500).json({ error: 'Failed to send reply' });
+  }
 });
 
 export default router;

@@ -1,6 +1,6 @@
 /**
- * OpenAI chat-completions helper for blog agents.
- * Reads OPENAI_API_KEY and OPENAI_MODEL from process.env (loaded via server/.env).
+ * OpenAI chat-completions helper for Content Engine / writing agents.
+ * Reads OPENAI_API_KEY from process.env. Callers may override model (e.g. gpt-5.6-sol).
  */
 
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
@@ -20,25 +20,58 @@ export async function generateJSON({ system, user, schemaHint, model, temperatur
     ? `${user}\n\nRespond with valid JSON matching this shape:\n${schemaHint}`
     : user;
 
+  const body = {
+    model: resolvedModel,
+    response_format: { type: 'json_object' },
+    messages: [
+      { role: 'system', content: system },
+      { role: 'user', content: userContent },
+    ],
+  };
+  // Reasoning models may ignore temperature; still send when caller asks for creative variance.
+  if (typeof temperature === 'number') {
+    body.temperature = temperature;
+  }
+
   const res = await fetch(OPENAI_URL, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${apiKey}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({
-      model: resolvedModel,
-      temperature,
-      response_format: { type: 'json_object' },
-      messages: [
-        { role: 'system', content: system },
-        { role: 'user', content: userContent },
-      ],
-    }),
+    body: JSON.stringify(body),
   });
 
   if (!res.ok) {
     const errBody = await res.text().catch(() => '');
+    // Some frontier models reject temperature — retry once without it.
+    if (
+      typeof temperature === 'number' &&
+      /temperature|unsupported_value|invalid_request/i.test(errBody) &&
+      res.status === 400
+    ) {
+      delete body.temperature;
+      const retry = await fetch(OPENAI_URL, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+      });
+      if (!retry.ok) {
+        const retryBody = await retry.text().catch(() => '');
+        throw new Error(`OpenAI API ${retry.status}: ${retryBody.slice(0, 500)}`);
+      }
+      const retryData = await retry.json();
+      const retryContent = retryData.choices?.[0]?.message?.content;
+      if (!retryContent) throw new Error('OpenAI returned empty content');
+      try {
+        return JSON.parse(retryContent);
+      } catch {
+        throw new Error(`OpenAI returned invalid JSON: ${retryContent.slice(0, 200)}`);
+      }
+    }
     throw new Error(`OpenAI API ${res.status}: ${errBody.slice(0, 500)}`);
   }
 

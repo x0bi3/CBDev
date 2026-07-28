@@ -165,17 +165,22 @@ export function odysseusUsernameForUser(userRow) {
 }
 
 export async function syncUserToOdysseus(userRow) {
-  const username = odysseusUsernameForUser(userRow);
-  const result = await runOdysseusSso({
-    action: 'sync',
-    username,
-    password_hash: userRow.password_hash,
-    is_admin: userRow.role === 'admin',
-  });
-  if (!result.ok) {
-    console.error('odysseus-sync: failed for', userRow.email);
+  try {
+    const username = odysseusUsernameForUser(userRow);
+    const result = await runOdysseusSso({
+      action: 'sync',
+      username,
+      password_hash: userRow.password_hash,
+      is_admin: userRow.role === 'admin',
+    });
+    if (!result.ok) {
+      console.error('odysseus-sync: failed for', userRow.email);
+    }
+    return result.ok;
+  } catch (err) {
+    console.error('odysseus-sync:', err.message || err);
+    return false;
   }
-  return result.ok;
 }
 
 async function checkOdysseusSession(token, expectedUsername) {
